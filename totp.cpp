@@ -174,7 +174,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 #define ROUNDED_CORNER_TOP_RIGHT 2
 #define ROUNDED_CORNER_TOP_LEFT 3
 
-HBITMAP CreateRoundedCorner(HDC dc, COLORREF color, int radius, int corner) {
+HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius, int corner) {
 	HDC dc2 = CreateCompatibleDC(dc);
 	HBITMAP bmp = CreateCompatibleBitmap(dc, radius, radius);
 	HGDIOBJ oldObj = SelectObject(dc2, bmp);
@@ -189,12 +189,20 @@ HBITMAP CreateRoundedCorner(HDC dc, COLORREF color, int radius, int corner) {
 		for (int y=0; y<radius; y++) {
 			COLORREF pixelColor = RGB(255,255,255);
 			int distanceSq = x*x + y*y;
-			if (distanceSq >= distanceMin && distanceSq <= distanceMax) {
+			if (distanceSq <= distanceMin) {
+				pixelColor = inside;
+			} else if (distanceSq >= distanceMax) {
+				pixelColor = outside;
+			} else {
 				float distance = sqrt((float)distanceSq);
-				float distanceWrongness = fabs(distance - curveMiddle);
-				if (distanceWrongness <= 1) {
-					int intensity = 200 + (int)((distanceWrongness)*55);
-					pixelColor = RGB(intensity, intensity, intensity);
+				float distanceWrongness = distance - curveMiddle;
+
+				if (distanceWrongness > 0) {
+					int fade = distanceWrongness * 256;
+					pixelColor = RGB( (GetRValue(outside)*fade + GetRValue(border)*(256-fade))/256, (GetGValue(outside)*fade + GetGValue(border)*(256-fade))/256, (GetBValue(outside)*fade + GetBValue(border)*(256-fade))/256 );
+				} else {
+					int fade = distanceWrongness * -256;
+					pixelColor = RGB( (GetRValue(inside)*fade + GetRValue(border)*(256-fade))/256, (GetGValue(inside)*fade + GetGValue(border)*(256-fade))/256, (GetBValue(inside)*fade + GetBValue(border)*(256-fade))/256 );
 				}
 			}
 			
@@ -249,10 +257,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			int radius = 5;
 			int margin = radius + 5;
-			HBITMAP topLeft = CreateRoundedCorner(hdc, RGB(255,0,0), radius, ROUNDED_CORNER_TOP_LEFT);
-			HBITMAP topRight = CreateRoundedCorner(hdc, RGB(255,0,0), radius, ROUNDED_CORNER_TOP_RIGHT);
-			HBITMAP bottomLeft = CreateRoundedCorner(hdc, RGB(255,0,0), radius, ROUNDED_CORNER_BOTTOM_LEFT);
-			HBITMAP bottomRight = CreateRoundedCorner(hdc, RGB(255,0,0), radius, ROUNDED_CORNER_BOTTOM_RIGHT);
+			HBITMAP topLeft = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_TOP_LEFT);
+			HBITMAP topRight = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_TOP_RIGHT);
+			HBITMAP bottomLeft = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_BOTTOM_LEFT);
+			HBITMAP bottomRight = CreateRoundedCorner(hdc, RGB(255,0,0), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_BOTTOM_RIGHT);
 			HDC src = CreateCompatibleDC(hdc);
 
 			SelectObject(src, topLeft); BitBlt(hdc, editArea.left-margin,editArea.top-margin,radius,radius,src,0,0,SRCCOPY);
