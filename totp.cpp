@@ -169,18 +169,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
 #include <math.h>
 
-#define ROUNDED_CORNER_BOTTOM_RIGHT 0
-#define ROUNDED_CORNER_BOTTOM_LEFT 1
-#define ROUNDED_CORNER_TOP_RIGHT 2
-#define ROUNDED_CORNER_TOP_LEFT 3
-
-HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius, int corner) {
+HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius) {
 	HDC dc2 = CreateCompatibleDC(dc);
-	HBITMAP bmp = CreateCompatibleBitmap(dc, radius, radius);
+	HBITMAP bmp = CreateCompatibleBitmap(dc, radius*2, radius*2);
 	HGDIOBJ oldObj = SelectObject(dc2, bmp);
-
-	bool flipHorizontal = (corner&1)!=0;
-	bool flipVertical = (corner&2)!=0;
 
 	int curveMiddle = radius-1;
 	int distanceMin = (curveMiddle-1)*(curveMiddle-1);
@@ -201,12 +193,15 @@ HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF o
 					int fade = distanceWrongness * 256;
 					pixelColor = RGB( (GetRValue(outside)*fade + GetRValue(border)*(256-fade))/256, (GetGValue(outside)*fade + GetGValue(border)*(256-fade))/256, (GetBValue(outside)*fade + GetBValue(border)*(256-fade))/256 );
 				} else {
-					int fade = distanceWrongness * -256;
+					int fade = -distanceWrongness * 256;
 					pixelColor = RGB( (GetRValue(inside)*fade + GetRValue(border)*(256-fade))/256, (GetGValue(inside)*fade + GetGValue(border)*(256-fade))/256, (GetBValue(inside)*fade + GetBValue(border)*(256-fade))/256 );
 				}
 			}
 			
-			SetPixel(dc2, flipHorizontal ? radius-1-x : x, flipVertical ? radius-1-y : y, pixelColor);
+			SetPixel(dc2, radius - 1 - x, radius - 1 - y, pixelColor);
+			SetPixel(dc2, radius + x, radius + y, pixelColor);
+			SetPixel(dc2, radius - 1 - x, radius + y, pixelColor);
+			SetPixel(dc2, radius + x, radius - 1 - y, pixelColor);
 		}
 	}
 
@@ -257,20 +252,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			int radius = 5;
 			int margin = radius + 5;
-			HBITMAP topLeft = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_TOP_LEFT);
-			HBITMAP topRight = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_TOP_RIGHT);
-			HBITMAP bottomLeft = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_BOTTOM_LEFT);
-			HBITMAP bottomRight = CreateRoundedCorner(hdc, RGB(255,0,0), RGB(200,200,200), RGB(255,255,255), radius, ROUNDED_CORNER_BOTTOM_RIGHT);
+			HBITMAP textBoxCorners = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius);
 			HDC src = CreateCompatibleDC(hdc);
 
-			SelectObject(src, topLeft); BitBlt(hdc, editArea.left-margin,editArea.top-margin,radius,radius,src,0,0,SRCCOPY);
-			SelectObject(src, topRight); BitBlt(hdc, editArea.right+margin-radius,editArea.top-margin,radius,radius,src,0,0,SRCCOPY);
-			SelectObject(src, bottomLeft); BitBlt(hdc, editArea.left-margin,editArea.bottom+margin-radius,radius,radius,src,0,0,SRCCOPY);
-			SelectObject(src, bottomRight); BitBlt(hdc, editArea.right+margin-radius,editArea.bottom+margin-radius,radius,radius,src,0,0,SRCCOPY);
+			SelectObject(src, textBoxCorners);
+			BitBlt(hdc, editArea.left-margin,editArea.top-margin,radius,radius,src,0,0,SRCCOPY);
+			BitBlt(hdc, editArea.right+margin-radius,editArea.top-margin,radius,radius,src,radius,0,SRCCOPY);
+			BitBlt(hdc, editArea.left-margin,editArea.bottom+margin-radius,radius,radius,src,0,radius,SRCCOPY);
+			BitBlt(hdc, editArea.right+margin-radius,editArea.bottom+margin-radius,radius,radius,src,radius,radius,SRCCOPY);
 
 			DeleteDC(src);
 
-			
 			HBRUSH br = CreateSolidBrush(RGB(200,200,200));
 
 			int marginOnly = margin-radius;
