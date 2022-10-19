@@ -110,9 +110,8 @@ int ButtonLineWeight(int bottom) {
 	return bottom/12 & ~1;
 }
 
-void DrawButtonBackground(HDC hdc, RECT r, LPCTSTR text) {
+void DrawButtonBackground(HDC hdc, RECT r, LPCTSTR text, COLORREF textColor) {
 	HBRUSH br = CreateSolidBrush(RGB(230,230,230));
-
 	FillRect(hdc, &r, br);
 			
 	SetBkMode(hdc, TRANSPARENT);
@@ -120,8 +119,11 @@ void DrawButtonBackground(HDC hdc, RECT r, LPCTSTR text) {
 
 	RECT textRect = r;
 	textRect.bottom -= textRect.bottom/8;
+
+	COLORREF oldColor = SetTextColor(hdc, textColor);
 	DrawText(hdc, text, -1, &textRect, DT_SINGLELINE|DT_CENTER|DT_BOTTOM);
-	
+	SetTextColor(hdc, oldColor);
+
 	HBRUSH topLineBrush = CreateSolidBrush(RGB(200,200,200));
 	SelectObject(hdc, topLineBrush);
 	r.bottom = r.top + 1;
@@ -143,10 +145,12 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
+			COLORREF foreground = RGB(0,0,0);
+
 			RECT r;
 			GetClientRect(hWnd, &r);
 			
-			DrawButtonBackground(hdc, r, L"Scan");
+			DrawButtonBackground(hdc, r, L"Scan", foreground);
 			
 			int qrMiddle = ButtonIconMiddle(r.bottom);
 			int qrHeight = r.bottom / 2;
@@ -163,7 +167,7 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			SelectObject(bmpDc, bmp);
 			for (int x=0; x<qrHeight; x++) {
 				for (int y=0; y<qrHeight; y++) {
-					SetPixel(bmpDc, x, y, x==0 || y==0 || x+1==qrHeight||y+1==qrHeight || (rng&1) ? RGB(255,255,255) : RGB(0,0,0));
+					SetPixel(bmpDc, x, y, x==0 || y==0 || x+1==qrHeight||y+1==qrHeight || (rng&1) ? RGB(255,255,255) : foreground);
 					rng = (75 * rng + 74) % 65537;
 				}
 			}
@@ -175,7 +179,7 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 				for (int dx=-4; dx<=4; dx++) {
 					for (int dy=-4; dy<=4; dy++) {
 						int distance = max(abs(dx), abs(dy));
-						SetPixel(bmpDc, baseX+dx, baseY+dy, distance%2 || distance==0 ? RGB(0,0,0) : RGB(255,255,255));
+						SetPixel(bmpDc, baseX+dx, baseY+dy, distance%2 || distance==0 ? foreground : RGB(255,255,255));
 					}
 				}
 
@@ -204,21 +208,23 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
+			COLORREF foreground = RGB(240,30,30);
+
 			RECT r;
 			GetClientRect(hWnd, &r);
-			DrawButtonBackground(hdc, r, L"Add");
+			DrawButtonBackground(hdc, r, L"Add", foreground);
 			
 			int thickness = ButtonLineWeight(r.bottom);
 			int plusMiddleX = r.right / 2;
 			int plusMiddleY = ButtonIconMiddle(r.bottom);
 			int length = r.bottom / 5;
 
-			HBITMAP corners = CreateRoundedCorner(hdc, RGB(0,0,0), RGB(0,0,0), RGB(230,230,230), thickness/2);
+			HBITMAP corners = CreateRoundedCorner(hdc, foreground, foreground, RGB(230,230,230), thickness/2);
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
 			SelectObject(cornersDC, corners);
 
-			HBRUSH plusBrush = CreateSolidBrush(RGB(0,0,0));
+			HBRUSH plusBrush = CreateSolidBrush(foreground);
 			RECT horizontalBar;
 			horizontalBar.top = plusMiddleY - thickness/2;
 			horizontalBar.bottom = plusMiddleY + thickness/2;
@@ -265,9 +271,10 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
+			COLORREF foreground = RGB(0,0,0);
 			RECT r;
 			GetClientRect(hWnd, &r);
-			DrawButtonBackground(hdc, r, L"Accounts");
+			DrawButtonBackground(hdc, r, L"Accounts", foreground);
 			
 			int itemHeight = ButtonLineWeight(r.bottom);
 			int itemLeft = r.right / 3;
@@ -276,8 +283,8 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			int itemSpacing = r.bottom / 6;
 
 
-			HBRUSH fillBrush = CreateSolidBrush(RGB(0,0,0));
-			HBITMAP corners = CreateRoundedCorner(hdc, RGB(0,0,0), RGB(0,0,0), RGB(230,230,230), itemHeight/2);
+			HBRUSH fillBrush = CreateSolidBrush(foreground);
+			HBITMAP corners = CreateRoundedCorner(hdc, foreground, foreground, RGB(230,230,230), itemHeight/2);
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
 			SelectObject(cornersDC, corners);
@@ -363,8 +370,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    SetWindowText(edit, _T("TExt content"));
    
    SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
-
-   //CreateWindowEx(
    
    int bottomCornerButtonSize = (clientRect.right - clientRect.left) / 3;
    int bottomButtonHeight = (int)(bottomCornerButtonSize / 1.618);
