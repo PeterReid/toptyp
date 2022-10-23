@@ -20,8 +20,11 @@ INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 
 HWND mainWnd = NULL;
 
+HWND scroll = NULL;
 
-HFONT iconFont;
+HFONT iconFont = NULL;
+HFONT font = NULL;
+
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
 
 int APIENTRY _tWinMain(HINSTANCE hInstance,
@@ -142,6 +145,8 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 	HDC hdc;
     switch (uMsg)
     {
+	case WM_ERASEBKGND:
+		return TRUE;
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
@@ -149,8 +154,6 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			RECT r;
 			GetClientRect(hWnd, &r);
-			
-			DrawButtonBackground(hdc, r, L"Scan", foreground);
 			
 			int qrMiddle = ButtonIconMiddle(r.bottom);
 			int qrHeight = r.bottom / 2;
@@ -185,6 +188,7 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			}
 
+			DrawButtonBackground(hdc, r, L"Scan", foreground);
 			StretchBlt(hdc, r.right/2 - qrScale * qrHeight / 2, qrMiddle - qrHeight*qrScale/2, qrScale*qrHeight, qrScale*qrHeight, bmpDc, 0,0, qrHeight, qrHeight, SRCCOPY);
 
 			DeleteDC(bmpDc);
@@ -205,6 +209,8 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 	HDC hdc;
     switch (uMsg)
     {
+	case WM_ERASEBKGND:
+		return TRUE;
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
@@ -268,6 +274,8 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 	HDC hdc;
     switch (uMsg)
     {
+	case WM_ERASEBKGND:
+		return TRUE;
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
@@ -314,6 +322,7 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+
 //
 //   FUNCTION: InitInstance(HINSTANCE, int)
 //
@@ -325,13 +334,18 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 //        create and display the main program window.
 //
 RECT editArea;
+RECT scrollRect;
+int sizeBasis = 0;
+int bottomButtonHeight = 0;
+
+
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    HWND hWnd;
 
    hInst = hInstance; // Store instance handle in our global variable
 
-   int sizeBasis = GetSystemMetrics(SM_CYVSCROLL);
+   sizeBasis = GetSystemMetrics(SM_CYVSCROLL);
    int width = sizeBasis*24;
    int height = (int)(width * 1.618);
    
@@ -346,10 +360,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    RECT clientRect;
    GetClientRect(hWnd, &clientRect);
 
-   RECT scrollRect = clientRect;
-   scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
-
-   HFONT font = CreateFont(sizeBasis*6/4, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FF_MODERN, L"Segoe UI");
+   font = CreateFont(sizeBasis*6/4, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FF_MODERN, L"Segoe UI");
    iconFont = CreateFont(sizeBasis, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FF_MODERN, L"Segoe UI");
 
    
@@ -361,20 +372,26 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    int editMargin = sizeBasis*3/2;
    
+   int bottomCornerButtonSize = (clientRect.right - clientRect.left) / 3;
+   bottomButtonHeight = (int)(bottomCornerButtonSize / 1.618);
+
    editArea.left = editMargin;
    editArea.top = editMargin;
-   editArea.right = scrollRect.left - editMargin;
+   editArea.right = clientRect.right - editMargin;
    editArea.bottom = editArea.top + tm.tmHeight;
+
+   scrollRect = clientRect;
+   scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
+   scrollRect.top = editArea.bottom + sizeBasis;
+   scrollRect.bottom -= bottomButtonHeight;
 
    HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, editArea.left,editArea.top, editArea.right - editArea.left,editArea.bottom - editArea.top, hWnd, NULL, NULL, NULL);
    SetWindowText(edit, _T("TExt content"));
    
    SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
    
-   int bottomCornerButtonSize = (clientRect.right - clientRect.left) / 3;
-   int bottomButtonHeight = (int)(bottomCornerButtonSize / 1.618);
 
-   HWND scroll = CreateWindowEx( 0, // no extended styles 
+   scroll = CreateWindowEx( 0, // no extended styles 
             L"SCROLLBAR",           // scroll bar control class 
             (PTSTR) NULL,           // no window text 
             WS_CHILD | WS_VISIBLE   // window styles  
@@ -382,13 +399,19 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
             scrollRect.left,              // horizontal position 
             scrollRect.top, // vertical position 
 			scrollRect.right - scrollRect.left,             // width of the scroll bar 
-			scrollRect.bottom - scrollRect.top - bottomButtonHeight,               // height of the scroll bar
+			scrollRect.bottom - scrollRect.top,               // height of the scroll bar
             hWnd,             // handle to main window 
             (HMENU) NULL,           // no menu 
             hInstance,                // instance owning this window 
             (PVOID) NULL            // pointer not needed 
 			);
 
+   SCROLLINFO info = { 0 };
+   info.cbSize = sizeof(info);
+   info.fMask = SIF_RANGE | SIF_PAGE;
+   info.nMax = 20 * sizeBasis*4;
+   info.nPage = sizeBasis*4*10;
+   SetScrollInfo(scroll, SB_CTL, &info, FALSE);
 
    HWND accountsTabWnd = CreateWindowEx( 0,
 	   L"BUTTON",
@@ -495,44 +518,117 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
 		break;
+	case WM_VSCROLL:
+		{
+			int type = LOWORD(wParam);
+			if (type == SB_THUMBPOSITION || type == SB_THUMBTRACK) {
+
+
+				int pos = HIWORD(wParam);
+				SetScrollPos(scroll, SB_CTL, pos, FALSE);
+				RECT r;
+				r.left = 0;
+				r.right = scrollRect.left;
+				r.bottom = scrollRect.bottom;
+				r.top = scrollRect.top;
+				InvalidateRect(hWnd, &r, FALSE);
+			}
+		}
+		break;
+	case WM_ERASEBKGND:
+		break;
 	case WM_PAINT:
 		{
 			hdc = BeginPaint(hWnd, &ps);
-			// TODO: Add any drawing code here...
 
-			int radius = 5;
-			int margin = radius + 5;
-			HBITMAP textBoxCorners = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius);
-			HDC src = CreateCompatibleDC(hdc);
+			{
+				int radius = 5;
+				int margin = radius + 5;
+				HBITMAP textBoxCorners = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius);
+				HDC src = CreateCompatibleDC(hdc);
 
-			SelectObject(src, textBoxCorners);
-			BitBlt(hdc, editArea.left-margin,editArea.top-margin,radius,radius,src,0,0,SRCCOPY);
-			BitBlt(hdc, editArea.right+margin-radius,editArea.top-margin,radius,radius,src,radius,0,SRCCOPY);
-			BitBlt(hdc, editArea.left-margin,editArea.bottom+margin-radius,radius,radius,src,0,radius,SRCCOPY);
-			BitBlt(hdc, editArea.right+margin-radius,editArea.bottom+margin-radius,radius,radius,src,radius,radius,SRCCOPY);
+				SelectObject(src, textBoxCorners);
+				BitBlt(hdc, editArea.left-margin,editArea.top-margin,radius,radius,src,0,0,SRCCOPY);
+				BitBlt(hdc, editArea.right+margin-radius,editArea.top-margin,radius,radius,src,radius,0,SRCCOPY);
+				BitBlt(hdc, editArea.left-margin,editArea.bottom+margin-radius,radius,radius,src,0,radius,SRCCOPY);
+				BitBlt(hdc, editArea.right+margin-radius,editArea.bottom+margin-radius,radius,radius,src,radius,radius,SRCCOPY);
 
-			DeleteDC(src);
-			DeleteObject(textBoxCorners);
+				DeleteDC(src);
+				DeleteObject(textBoxCorners);
 
-			HBRUSH br = CreateSolidBrush(RGB(200,200,200));
+				HBRUSH br = CreateSolidBrush(RGB(200,200,200));
 
-			int marginOnly = margin-radius;
+				int marginOnly = margin-radius;
 
-			RECT r;
+				RECT r;
 			
-			r = editArea; r.top = editArea.top-margin; r.bottom = r.top + 1; r.left -= marginOnly; r.right += marginOnly;
-			FillRect(hdc, &r, br);
+				r = editArea; r.top = editArea.top-margin; r.bottom = r.top + 1; r.left -= marginOnly; r.right += marginOnly;
+				FillRect(hdc, &r, br);
 
-			r.bottom = editArea.bottom+margin; r.top = r.bottom - 1;
-			FillRect(hdc, &r, br);
+				r.bottom = editArea.bottom+margin; r.top = r.bottom - 1;
+				FillRect(hdc, &r, br);
 			
-			r = editArea; r.left = editArea.left-margin; r.right = r.left + 1; r.top -= marginOnly; r.bottom += marginOnly;
-			FillRect(hdc, &r, br);
+				r = editArea; r.left = editArea.left-margin; r.right = r.left + 1; r.top -= marginOnly; r.bottom += marginOnly;
+				FillRect(hdc, &r, br);
 
-			r.right = editArea.right + margin; r.left = r.right - 1;
-			FillRect(hdc, &r, br);
+				r.right = editArea.right + margin; r.left = r.right - 1;
+				FillRect(hdc, &r, br);
+			}
 
+
+
+			RECT area;
+			GetClientRect(hWnd, &area);
+			int listTop = editArea.bottom + sizeBasis;
+			int listBottom = area.bottom - bottomButtonHeight;
+			HRGN listRegion = CreateRectRgn(area.left, listTop + sizeBasis, scrollRect.left, listBottom); 
+			SelectClipRgn (hdc, listRegion);
+			
+
+			HBRUSH dividerBrush = CreateSolidBrush(RGB(230,230,230));
+			HBRUSH backgroundBrush = CreateSolidBrush(RGB(255,255,255));
+			
+			int listItemHeight = sizeBasis*4;
+			int dividerHeight = sizeBasis/6;
+			SelectObject(hdc, font);
+
+			int textHeight;
+			{
+				RECT measureRect = area;
+				DrawText(hdc, L"O", 1, &measureRect, DT_SINGLELINE|DT_CALCRECT);
+				textHeight = measureRect.bottom - measureRect.top;
+			}
+
+			// Draw the actual list of accounts
+			int pos = GetScrollPos(scroll, SB_CTL);
+			for (int i=0, listY = listTop - pos; i<20; i++, listY += listItemHeight) {
+				if (listY + listItemHeight < listTop) continue;
+				if (listY > listBottom) break;
+				RECT divider;
+				divider.left = 0;
+				divider.right = scrollRect.left;
+				divider.top = listY + listItemHeight - dividerHeight;
+				divider.bottom = divider.top + dividerHeight;
+
+				RECT itemArea = divider;
+				itemArea.top = listY;
+				itemArea.bottom = listY + listItemHeight;
+				FillRect(hdc, &itemArea, backgroundBrush);
+
+				RECT textRect = divider;
+				textRect.left = sizeBasis;
+				textRect.top = listY + (listItemHeight - textHeight)/2;
+				DrawText(hdc, L"Option", -1, &textRect, DT_SINGLELINE);
+
+
+				FillRect(hdc, &divider, dividerBrush);
+			}
+
+			SelectClipRgn(hdc, NULL);
 			EndPaint(hWnd, &ps);
+
+			DeleteObject(dividerBrush);
+			DeleteObject(backgroundBrush);
 		}
 		break;
 	case WM_DESTROY:
