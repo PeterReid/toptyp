@@ -214,7 +214,7 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
-			COLORREF foreground = RGB(240,30,30);
+			COLORREF foreground = RGB(0,0,0);
 
 			RECT r;
 			GetClientRect(hWnd, &r);
@@ -225,7 +225,7 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			int plusMiddleY = ButtonIconMiddle(r.bottom);
 			int length = r.bottom / 5;
 
-			HBITMAP corners = CreateRoundedCorner(hdc, foreground, foreground, RGB(230,230,230), thickness/2);
+			HBITMAP corners = CreateRoundedCorner(hdc, RGB(255,255,255), foreground, RGB(230,230,230), thickness/2);
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
 			SelectObject(cornersDC, corners);
@@ -250,9 +250,46 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			BitBlt(hdc, verticalBar.left, verticalBar.top-thickness/2, thickness, thickness/2, cornersDC, 0,0,SRCCOPY);
 			BitBlt(hdc, verticalBar.left, verticalBar.bottom, thickness, thickness/2, cornersDC, 0,thickness/2,SRCCOPY);
 
+			{ // Draw the four segments that are the horizontal lines outlining the horizontal crossbar of the plus.
+				RECT horizontalBarLine = horizontalBar;
+				horizontalBarLine.right = plusMiddleX - thickness/2;
+				horizontalBarLine.bottom = horizontalBarLine.top + 1;
+				FillRect(hdc, &horizontalBarLine, plusBrush);
+				horizontalBarLine.top = plusMiddleY + thickness/2 - 1;
+				horizontalBarLine.bottom = horizontalBarLine.top + 1;
+				FillRect(hdc, &horizontalBarLine, plusBrush);
+				horizontalBarLine.left = plusMiddleX + thickness/2;
+				horizontalBarLine.right = plusMiddleX + length;
+				FillRect(hdc, &horizontalBarLine, plusBrush);
+				horizontalBarLine.top = plusMiddleY - thickness/2;
+				horizontalBarLine.bottom = horizontalBarLine.top + 1;
+				FillRect(hdc, &horizontalBarLine, plusBrush);
+			}
 
-			FillRect(hdc, &horizontalBar, plusBrush);
-			FillRect(hdc, &verticalBar, plusBrush);
+			{ // Draw the four segments that are the vertical lines outlining the vertical crossbar of the plus.
+				RECT verticalBarLine = verticalBar;
+				verticalBarLine.bottom = plusMiddleY - thickness/2 + 1;
+				verticalBarLine.right = verticalBarLine.left + 1;
+				FillRect(hdc, &verticalBarLine, plusBrush);
+				verticalBarLine.left = plusMiddleX + thickness/2 - 1;
+				verticalBarLine.right = verticalBarLine.left + 1;
+				FillRect(hdc, &verticalBarLine, plusBrush);
+				verticalBarLine.top = plusMiddleY + thickness/2 - 1;
+				verticalBarLine.bottom = plusMiddleY + length;
+				FillRect(hdc, &verticalBarLine, plusBrush);
+				verticalBarLine.left = plusMiddleX - thickness/2;
+				verticalBarLine.right = verticalBarLine.left + 1;
+				FillRect(hdc, &verticalBarLine, plusBrush);
+			}
+
+			HBRUSH whiteBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
+			horizontalBar.top += 1;
+			horizontalBar.bottom -= 1;
+			FillRect(hdc, &horizontalBar, whiteBrush);
+
+			verticalBar.left += 1;
+			verticalBar.right -= 1;
+			FillRect(hdc, &verticalBar, whiteBrush);
 
 			DeleteDC(cornersDC);
 			DeleteObject(corners);
@@ -279,7 +316,7 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
-			COLORREF foreground = RGB(0,0,0);
+			COLORREF foreground = RGB(240,30,30);
 			RECT r;
 			GetClientRect(hWnd, &r);
 			DrawButtonBackground(hdc, r, L"Accounts", foreground);
@@ -292,7 +329,8 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 
 			HBRUSH fillBrush = CreateSolidBrush(foreground);
-			HBITMAP corners = CreateRoundedCorner(hdc, foreground, foreground, RGB(230,230,230), itemHeight/2);
+			HBRUSH whiteBrush = (HBRUSH)::GetStockObject(WHITE_BRUSH);
+			HBITMAP corners = CreateRoundedCorner(hdc, RGB(255,255,255), foreground, RGB(230,230,230), itemHeight/2);
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
 			SelectObject(cornersDC, corners);
@@ -303,10 +341,17 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 				BitBlt(hdc, itemLeft + itemHeight*3/2, itemTop, itemHeight/2, itemHeight, cornersDC,0,0,SRCCOPY);
 				BitBlt(hdc, itemRight - itemHeight/2, itemTop, itemHeight/2, itemHeight, cornersDC,itemHeight/2,0,SRCCOPY);
 				RECT bodyRect;
-				bodyRect.top = itemTop;
-				bodyRect.bottom = itemTop + itemHeight;
+				bodyRect.top = itemTop + 1;
+				bodyRect.bottom = itemTop + itemHeight - 1;
 				bodyRect.right = itemRight - itemHeight/2;
 				bodyRect.left = itemLeft + itemHeight*4/2;
+				FillRect(hdc, &bodyRect, whiteBrush);
+
+				bodyRect.top = itemTop;
+				bodyRect.bottom = itemTop + 1;
+				FillRect(hdc, &bodyRect, fillBrush);
+				bodyRect.top = itemTop + itemHeight - 1;
+				bodyRect.bottom = bodyRect.top + 1;
 				FillRect(hdc, &bodyRect, fillBrush);
 			}
 
@@ -654,7 +699,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				RECT textRect = divider;
 				textRect.left = sizeBasis;
 				textRect.top = listY + (listItemHeight - textHeight)/2;
-				DrawText(hdc, L"Option", -1, &textRect, DT_SINGLELINE);
+				WCHAR ch[50];
+				wsprintf(ch, L"Option %d", i+1);
+				DrawText(hdc, ch, -1, &textRect, DT_SINGLELINE);
 
 
 				FillRect(hdc, &divider, dividerBrush);
