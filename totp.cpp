@@ -323,6 +323,14 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 }
 
 
+struct HintingEditData {
+	BOOL showingHint;
+	BOOL hasFocus;
+	LPCTSTR hintText;
+};
+
+HintingEditData searchHintingEditData = { TRUE, FALSE, L"Search..." };
+
 //
 //   FUNCTION: InitInstance(HINSTANCE, int)
 //
@@ -337,7 +345,6 @@ RECT editArea;
 RECT scrollRect;
 int sizeBasis = 0;
 int bottomButtonHeight = 0;
-
 
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
@@ -385,8 +392,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    scrollRect.top = editArea.bottom + sizeBasis;
    scrollRect.bottom -= bottomButtonHeight;
 
-   HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, editArea.left,editArea.top, editArea.right - editArea.left,editArea.bottom - editArea.top, hWnd, NULL, NULL, NULL);
-   SetWindowText(edit, _T("TExt content"));
+   HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, editArea.left,editArea.top, editArea.right - editArea.left,editArea.bottom - editArea.top, hWnd, (HMENU)IDC_SEARCH, NULL, NULL);
+   SetWindowLongPtr(edit, GWLP_USERDATA, (LONG)&searchHintingEditData);
+   SetWindowText(edit, searchHintingEditData.hintText);
+
    
    SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
    
@@ -514,6 +523,33 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case IDM_EXIT:
 			DestroyWindow(hWnd);
 			break;
+		case IDC_SEARCH:
+			{
+				switch (wmEvent) {
+				case EN_SETFOCUS:
+					{
+						HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr((HWND)lParam, GWLP_USERDATA);
+						if (hintingEditData->showingHint) {
+							SetWindowText((HWND)lParam, L"");
+							hintingEditData->showingHint = FALSE;
+						}
+						hintingEditData->hasFocus = TRUE;
+					}
+					break;
+				case EN_KILLFOCUS:
+					{
+						HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr((HWND)lParam, GWLP_USERDATA);
+						if (!hintingEditData->showingHint && GetWindowTextLength((HWND)lParam)==0) {
+							SetWindowText((HWND)lParam, hintingEditData->hintText);
+							hintingEditData->showingHint = TRUE;
+						}
+						hintingEditData->hasFocus = FALSE;
+					}
+					break;
+				}
+
+			}
+			break;
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
@@ -629,6 +665,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			DeleteObject(dividerBrush);
 			DeleteObject(backgroundBrush);
+		}
+		break;
+	case WM_CTLCOLOREDIT:
+		{
+			LRESULT ret = DefWindowProc(hWnd, message, wParam, lParam);
+			HDC hdc = (HDC)wParam;
+			HWND wnd = (HWND)lParam;
+
+			HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr(wnd, GWLP_USERDATA);
+			if (hintingEditData && hintingEditData->showingHint) {
+				SetTextColor(hdc, RGB(200,200,200));
+			}
+			return ret;
 		}
 		break;
 	case WM_DESTROY:
