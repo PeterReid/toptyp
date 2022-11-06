@@ -552,6 +552,21 @@ void SetActiveTab(int idc)
 	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
 }
 
+int selectedItem = -1;
+void SetSelectedItem(int item) {
+	if (item == selectedItem) return;
+
+	selectedItem = item;
+	RECT invalidateArea = scrollRect;
+	invalidateArea.right = invalidateArea.left - 1;
+	invalidateArea.left = 0;
+	InvalidateRect(mainWnd, &invalidateArea, FALSE);
+}
+
+static int ListItemHeight() {
+	return sizeBasis * 4;
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -688,7 +703,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			HBRUSH dividerBrush = CreateSolidBrush(RGB(230,230,230));
 			HBRUSH backgroundBrush = CreateSolidBrush(RGB(255,255,255));
 			
-			int listItemHeight = sizeBasis*4;
+			int listItemHeight = ListItemHeight();
 			int dividerHeight = sizeBasis/6;
 			SelectObject(hdc, font);
 
@@ -712,14 +727,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 				RECT itemArea = divider;
 				itemArea.top = listY;
-				itemArea.bottom = listY + listItemHeight;
+				itemArea.bottom = listY + listItemHeight - dividerHeight;
 				FillRect(hdc, &itemArea, backgroundBrush);
 
 				RECT textRect = divider;
 				textRect.left = sizeBasis;
 				textRect.top = listY + (listItemHeight - textHeight)/2;
 				WCHAR ch[50];
-				wsprintf(ch, L"Option %d", i+1);
+				wsprintf(ch, L"Option %d%s", i+1, i == selectedItem ? L" (SEL)" : L"");
 				DrawText(hdc, ch, -1, &textRect, DT_SINGLELINE);
 
 
@@ -731,6 +746,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			DeleteObject(dividerBrush);
 			DeleteObject(backgroundBrush);
+		}
+		break;
+	case WM_MOUSEMOVE:
+		{
+			int x = LOWORD(lParam);
+			int y = HIWORD(lParam);
+
+			if (y >= scrollRect.top && y <= scrollRect.bottom && x <= scrollRect.left) {
+				int pos = GetScrollPos(scroll, SB_CTL);
+				int listItemHeight = ListItemHeight();
+				int itemIdx = (y - scrollRect.top + pos) / listItemHeight;
+				SetSelectedItem(itemIdx);
+			} else {
+				SetSelectedItem(-1);
+			}
 		}
 		break;
 	case WM_CTLCOLOREDIT:
