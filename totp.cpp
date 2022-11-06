@@ -25,6 +25,8 @@ HWND scroll = NULL;
 HFONT iconFont = NULL;
 HFONT font = NULL;
 
+int activeTab = IDC_TAB_ACCOUNTS;
+
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
 
 int APIENTRY _tWinMain(HINSTANCE hInstance,
@@ -138,6 +140,11 @@ void DrawButtonBackground(HDC hdc, RECT r, LPCTSTR text, COLORREF textColor) {
 	DeleteObject(topLineBrush);
 }
 
+COLORREF TabForegroundColor(bool selected)
+{
+	return selected ? RGB(240,30,30) : RGB(0,0,0);
+}
+
 LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                                LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
 {
@@ -150,13 +157,13 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
-			COLORREF foreground = RGB(0,0,0);
+			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_SCAN);
 
 			RECT r;
 			GetClientRect(hWnd, &r);
 			
 			int qrMiddle = ButtonIconMiddle(r.bottom);
-			int qrHeight = r.bottom / 2;
+			int qrHeight = r.bottom / 3;
 			int qrScale = 1;
 			while (qrHeight > 34) {
 				qrHeight /= 2;
@@ -214,7 +221,7 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
-			COLORREF foreground = RGB(0,0,0);
+			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_ADD);
 
 			RECT r;
 			GetClientRect(hWnd, &r);
@@ -223,7 +230,7 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			int thickness = ButtonLineWeight(r.bottom);
 			int plusMiddleX = r.right / 2;
 			int plusMiddleY = ButtonIconMiddle(r.bottom);
-			int length = r.bottom / 5;
+			int length = r.bottom / 7;
 
 			HBITMAP corners = CreateRoundedCorner(hdc, RGB(255,255,255), foreground, RGB(230,230,230), thickness/2);
 
@@ -316,16 +323,16 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
-			COLORREF foreground = RGB(240,30,30);
+			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_ACCOUNTS);
 			RECT r;
 			GetClientRect(hWnd, &r);
 			DrawButtonBackground(hdc, r, L"Accounts", foreground);
 			
 			int itemHeight = ButtonLineWeight(r.bottom);
-			int itemLeft = r.right / 3;
+			int itemLeft = (r.right - r.left)/2 - (r.right - r.left) / 9;
 			int itemRight = r.right - itemLeft;
 			int itemListMiddle = ButtonIconMiddle(r.bottom);
-			int itemSpacing = r.bottom / 6;
+			int itemSpacing = r.bottom / 8;
 
 
 			HBRUSH fillBrush = CreateSolidBrush(foreground);
@@ -434,7 +441,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    scrollRect = clientRect;
    scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
-   scrollRect.top = editArea.bottom + sizeBasis;
+   scrollRect.top = editArea.bottom + editMargin;
    scrollRect.bottom -= bottomButtonHeight;
 
    HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, editArea.left,editArea.top, editArea.right - editArea.left,editArea.bottom - editArea.top, hWnd, (HMENU)IDC_SEARCH, NULL, NULL);
@@ -471,17 +478,17 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	   L"BUTTON",
 	   L"Accounts",
 	   WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-	   clientRect.left,clientRect.bottom - bottomButtonHeight,bottomCornerButtonSize,bottomButtonHeight, hWnd, (HMENU)NULL, hInstance, (PVOID)NULL);
+	   clientRect.left,clientRect.bottom - bottomButtonHeight,bottomCornerButtonSize,bottomButtonHeight, hWnd, (HMENU)IDC_TAB_ACCOUNTS, hInstance, (PVOID)NULL);
    HWND addTabWnd = CreateWindowEx( 0,
 	   L"BUTTON",
 	   L"Add",
 	   WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-	   clientRect.left + bottomCornerButtonSize,clientRect.bottom - bottomButtonHeight,clientRect.right-clientRect.left - bottomCornerButtonSize*2,bottomButtonHeight, hWnd, (HMENU)NULL, hInstance, (PVOID)NULL);
+	   clientRect.left + bottomCornerButtonSize,clientRect.bottom - bottomButtonHeight,clientRect.right-clientRect.left - bottomCornerButtonSize*2,bottomButtonHeight, hWnd, (HMENU)IDC_TAB_ADD, hInstance, (PVOID)NULL);
 	HWND scanTabWnd = CreateWindowEx( 0,
 	   L"BUTTON",
 	   L"Scan",
 	   WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-	   clientRect.right - bottomCornerButtonSize,clientRect.bottom - bottomButtonHeight, bottomCornerButtonSize,bottomButtonHeight, hWnd, (HMENU)NULL, hInstance, (PVOID)NULL);
+	   clientRect.right - bottomCornerButtonSize,clientRect.bottom - bottomButtonHeight, bottomCornerButtonSize,bottomButtonHeight, hWnd, (HMENU)IDC_TAB_SCAN, hInstance, (PVOID)NULL);
  
    
    SetWindowSubclass(scanTabWnd, ScanButtonProc, 0, 0);
@@ -536,6 +543,13 @@ HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF o
 	DeleteDC(dc2);
 
 	return bmp;
+}
+
+void SetActiveTab(int idc)
+{
+	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
+	activeTab = idc;
+	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
 }
 
 //
@@ -594,6 +608,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				}
 
 			}
+			break;
+		case IDC_TAB_ACCOUNTS:
+		case IDC_TAB_ADD:
+		case IDC_TAB_SCAN:
+			SetActiveTab(wmId);
 			break;
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
