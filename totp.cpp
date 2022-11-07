@@ -60,8 +60,8 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 	}
 
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_TOTP));
-	handCursor = LoadCursor(hInstance, MAKEINTRESOURCE(IDC_HAND));
-	arrowCursor = LoadCursor(hInstance, MAKEINTRESOURCE(IDC_ARROW));
+	handCursor = LoadCursor(NULL, MAKEINTRESOURCE(IDC_HAND));
+	arrowCursor = LoadCursor(NULL, MAKEINTRESOURCE(IDC_ARROW));
 
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -578,6 +578,13 @@ static int ListItemHeight() {
 	return sizeBasis * 4;
 }
 
+RECT codeHitArea = { 0 };
+POINT mousePoint = { 0 };
+
+void UpdateMouseCursor() {
+	SetCursor( selectedItem>=0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor );
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -705,7 +712,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			RECT area;
 			GetClientRect(hWnd, &area);
-			int listTop = editArea.bottom + sizeBasis;
+			int listTop = scrollRect.top;
 			int listBottom = area.bottom - bottomButtonHeight;
 			HRGN listRegion = CreateRectRgn(area.left, listTop, scrollRect.left, listBottom); 
 			SelectClipRgn (hdc, listRegion);
@@ -747,7 +754,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					int millisPerCode = 30000;
 					LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
 					int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
-					int whichCode = (int)((millisecondsSinceEpoch / millisPerCode) % 20);
+					int whichCode = (int)((millisecondsSinceEpoch / millisPerCode) % 20) + 1;
 
 					RECT codeRect = divider;
 					codeRect.top = listY + (listItemHeight - textHeight)/2;
@@ -761,6 +768,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 
 					DrawText(hdc, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
+					codeHitArea = codeRect;
+					codeHitArea.left = codeHitArea.right - codeWidth;
+					codeHitArea.bottom = codeMeasureRect.bottom;
+					UpdateMouseCursor();
 
 					int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
 
@@ -813,6 +824,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			int x = LOWORD(lParam);
 			int y = HIWORD(lParam);
 
+			mousePoint.x = x;
+			mousePoint.y = y;
+
 			if (y >= scrollRect.top && y <= scrollRect.bottom && x <= scrollRect.left) {
 				int pos = GetScrollPos(scroll, SB_CTL);
 				int listItemHeight = ListItemHeight();
@@ -829,10 +843,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					TrackMouseEvent(&tme);
 					trackingMouseLeave = true;
 				}
+
 			} else {
 				SetSelectedItem(-1);
 			}
+			UpdateMouseCursor();
 		}
+		break;
+	case WM_LBUTTONDOWN:
+	case WM_RBUTTONDOWN:
+	case WM_LBUTTONUP:
+	case WM_RBUTTONUP:
+		UpdateMouseCursor();
 		break;
 	case WM_CTLCOLOREDIT:
 		{
