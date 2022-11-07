@@ -738,11 +738,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				FillRect(hdc, &itemArea, backgroundBrush);
 
 				if (i == selectedItem) {
+					FILETIME now;
+					GetSystemTimeAsFileTime(&now);
+					int millisPerCode = 30000;
+					LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
+					int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
+					int whichCode = millisecondsSinceEpoch / millisPerCode;
+
 					RECT codeRect = divider;
 					codeRect.top = listY + (listItemHeight - textHeight)/2;
 					codeRect.right -= sizeBasis;
 					WCHAR ch[50];
-					wsprintf(ch, L"%03d %03d", (129 * (i+1)) % 1000, (456 * (i+1))%1000);
+					wsprintf(ch, L"%03u %03u", (129 * (i+1) * (whichCode%20)) % 1000, (456 * (i+1) * (whichCode%20))%1000);
 
 					RECT codeMeasureRect = codeRect;
 					DrawText(hdc, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
@@ -750,12 +757,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 
 					DrawText(hdc, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
-
-					FILETIME now;
-					GetSystemTimeAsFileTime(&now);
-					int millisPerCode = 30000;
-					LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
-					int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
 
 					int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
 
