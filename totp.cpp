@@ -26,6 +26,9 @@ HFONT iconFont = NULL;
 HFONT font = NULL;
 
 int activeTab = IDC_TAB_ACCOUNTS;
+int trackingMouseLeave = false;
+
+int codeDrawingProgressTimer = 0;
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
 
@@ -415,7 +418,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    {
       return FALSE;
    }
-   
+
    RECT clientRect;
    GetClientRect(hWnd, &clientRect);
 
@@ -552,15 +555,19 @@ void SetActiveTab(int idc)
 	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
 }
 
+void InvalidateAccountList() {
+	RECT invalidateArea = scrollRect;
+	invalidateArea.right = invalidateArea.left - 1;
+	invalidateArea.left = 0;
+	InvalidateRect(mainWnd, &invalidateArea, FALSE);
+}
+
 int selectedItem = -1;
 void SetSelectedItem(int item) {
 	if (item == selectedItem) return;
 
 	selectedItem = item;
-	RECT invalidateArea = scrollRect;
-	invalidateArea.right = invalidateArea.left - 1;
-	invalidateArea.left = 0;
-	InvalidateRect(mainWnd, &invalidateArea, FALSE);
+	InvalidateAccountList();
 }
 
 static int ListItemHeight() {
@@ -730,11 +737,49 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				itemArea.bottom = listY + listItemHeight - dividerHeight;
 				FillRect(hdc, &itemArea, backgroundBrush);
 
+				if (i == selectedItem) {
+					RECT codeRect = divider;
+					codeRect.top = listY + (listItemHeight - textHeight)/2;
+					codeRect.right -= sizeBasis;
+					WCHAR ch[50];
+					wsprintf(ch, L"%03d %03d", (129 * (i+1)) % 1000, (456 * (i+1))%1000);
+
+					RECT codeMeasureRect = codeRect;
+					DrawText(hdc, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
+					int codeWidth = codeMeasureRect.right - codeMeasureRect.left;
+
+
+					DrawText(hdc, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
+
+					FILETIME now;
+					GetSystemTimeAsFileTime(&now);
+					int millisPerCode = 30000;
+					LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
+					int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
+
+					int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
+
+					HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
+					SelectClipRgn(hdc, redCode);
+					COLORREF oldColor = SetTextColor(hdc, TabForegroundColor(true));
+					DrawText(hdc, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
+					SetTextColor(hdc, oldColor);
+					SelectClipRgn(hdc, listRegion);
+					DeleteObject(redCode);
+					
+					// Time a redraw for when the above clipping region grows by a pixel.
+					if (codeDrawingProgressTimer) {
+						KillTimer(mainWnd, codeDrawingProgressTimer);
+					}
+					int nextPixelMillis = (pixelProgress + 1) * millisPerCode / codeWidth;
+					codeDrawingProgressTimer = SetTimer(mainWnd, ID_CODE_DRAWING_PROGRESS, nextPixelMillis - milliSecondsIntoCode + 10, NULL); // 10ms is an unnoticable slop, in case the WM_TIMER timing is not very accurate
+				}
+
 				RECT textRect = divider;
 				textRect.left = sizeBasis;
 				textRect.top = listY + (listItemHeight - textHeight)/2;
 				WCHAR ch[50];
-				wsprintf(ch, L"Option %d%s", i+1, i == selectedItem ? L" (SEL)" : L"");
+				wsprintf(ch, L"Option %d", i+1);
 				DrawText(hdc, ch, -1, &textRect, DT_SINGLELINE);
 
 
@@ -746,6 +791,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			DeleteObject(dividerBrush);
 			DeleteObject(backgroundBrush);
+			DeleteObject(listRegion);
+		}
+		break;
+	case WM_TIMER:
+		{
+			InvalidateAccountList();
+
+			// This was intended as aa one-shot timer. Kill it, or else it will repeat.
+			KillTimer(mainWnd, codeDrawingProgressTimer);
+			codeDrawingProgressTimer = 0;
 		}
 		break;
 	case WM_MOUSEMOVE:
@@ -758,6 +813,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				int listItemHeight = ListItemHeight();
 				int itemIdx = (y - scrollRect.top + pos) / listItemHeight;
 				SetSelectedItem(itemIdx);
+
+				// We need to know when the mouse leaves the window, so we can remove the hover effect then.
+				// TrackMouseEvent needs to be called once to start listening for that.
+				if (!trackingMouseLeave) {
+					TRACKMOUSEEVENT tme = { 0 };
+					tme.cbSize = sizeof(tme);
+					tme.hwndTrack = mainWnd;
+					tme.dwFlags = TME_LEAVE;
+					TrackMouseEvent(&tme);
+					trackingMouseLeave = true;
+				}
 			} else {
 				SetSelectedItem(-1);
 			}
@@ -775,6 +841,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 			return ret;
 		}
+		break;
+	case WM_MOUSELEAVE:
+		SetSelectedItem(-1);
+		trackingMouseLeave = false;
 		break;
 	case WM_DESTROY:
 		PostQuitMessage(0);

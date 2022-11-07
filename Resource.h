@@ -17,6 +17,7 @@
 #define IDC_TAB_ACCOUNTS	111
 #define IDC_TAB_ADD			112
 #define IDC_TAB_SCAN		113
+#define ID_CODE_DRAWING_PROGRESS 114
 #define IDC_MYICON				2
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1
