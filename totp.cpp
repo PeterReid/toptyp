@@ -32,6 +32,8 @@ int codeDrawingProgressTimer = 0;
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
 
+HCURSOR handCursor = NULL, arrowCursor = NULL;
+
 int APIENTRY _tWinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
                      LPTSTR    lpCmdLine,
@@ -58,6 +60,8 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 	}
 
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_TOTP));
+	handCursor = LoadCursor(hInstance, MAKEINTRESOURCE(IDC_HAND));
+	arrowCursor = LoadCursor(hInstance, MAKEINTRESOURCE(IDC_ARROW));
 
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -743,13 +747,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					int millisPerCode = 30000;
 					LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
 					int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
-					int whichCode = millisecondsSinceEpoch / millisPerCode;
+					int whichCode = (int)((millisecondsSinceEpoch / millisPerCode) % 20);
 
 					RECT codeRect = divider;
 					codeRect.top = listY + (listItemHeight - textHeight)/2;
 					codeRect.right -= sizeBasis;
 					WCHAR ch[50];
-					wsprintf(ch, L"%03u %03u", (129 * (i+1) * (whichCode%20)) % 1000, (456 * (i+1) * (whichCode%20))%1000);
+					wsprintf(ch, L"%03u %03u", (129 * (i+1) * whichCode) % 1000, (456 * (i+1) * whichCode)%1000);
 
 					RECT codeMeasureRect = codeRect;
 					DrawText(hdc, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
