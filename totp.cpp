@@ -703,7 +703,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			GetClientRect(hWnd, &area);
 			int listTop = editArea.bottom + sizeBasis;
 			int listBottom = area.bottom - bottomButtonHeight;
-			HRGN listRegion = CreateRectRgn(area.left, listTop + sizeBasis, scrollRect.left, listBottom); 
+			HRGN listRegion = CreateRectRgn(area.left, listTop, scrollRect.left, listBottom); 
 			SelectClipRgn (hdc, listRegion);
 			
 
@@ -759,7 +759,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 					int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
 
-					HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
+					HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, max(listTop, codeRect.top), codeRect.right - codeWidth + pixelProgress, min(listBottom, codeRect.bottom));\
 					SelectClipRgn(hdc, redCode);
 					COLORREF oldColor = SetTextColor(hdc, TabForegroundColor(true));
 					DrawText(hdc, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
