@@ -714,16 +714,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			GetClientRect(hWnd, &area);
 			int listTop = scrollRect.top;
 			int listBottom = area.bottom - bottomButtonHeight;
+			int listItemHeight = ListItemHeight();
+			int dividerHeight = sizeBasis/6;
+
 			HRGN listRegion = CreateRectRgn(area.left, listTop, scrollRect.left, listBottom); 
 			SelectClipRgn (hdc, listRegion);
-			
 
 			HBRUSH dividerBrush = CreateSolidBrush(RGB(230,230,230));
 			HBRUSH backgroundBrush = CreateSolidBrush(RGB(255,255,255));
 			
-			int listItemHeight = ListItemHeight();
-			int dividerHeight = sizeBasis/6;
-			SelectObject(hdc, font);
+			HBITMAP itemBmp = CreateCompatibleBitmap(hdc, scrollRect.left, listItemHeight);
+			HDC itemDC = CreateCompatibleDC(hdc);
+			SelectObject(itemDC, itemBmp);
+
+			SelectObject(itemDC, font);
 
 			int textHeight;
 			{
@@ -731,6 +735,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				DrawText(hdc, L"O", 1, &measureRect, DT_SINGLELINE|DT_CALCRECT);
 				textHeight = measureRect.bottom - measureRect.top;
 			}
+
 
 			// Draw the actual list of accounts
 			int pos = GetScrollPos(scroll, SB_CTL);
@@ -740,13 +745,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				RECT divider;
 				divider.left = 0;
 				divider.right = scrollRect.left;
-				divider.top = listY + listItemHeight - dividerHeight;
-				divider.bottom = divider.top + dividerHeight;
+				divider.top = listItemHeight - dividerHeight;
+				divider.bottom = listItemHeight;
 
 				RECT itemArea = divider;
-				itemArea.top = listY;
-				itemArea.bottom = listY + listItemHeight - dividerHeight;
-				FillRect(hdc, &itemArea, backgroundBrush);
+				itemArea.top = 0;
+				itemArea.bottom = listItemHeight - dividerHeight;
+				FillRect(itemDC, &itemArea, backgroundBrush);
 
 				if (i == selectedItem) {
 					FILETIME now;
@@ -757,17 +762,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					int whichCode = (int)((millisecondsSinceEpoch / millisPerCode) % 20) + 1;
 
 					RECT codeRect = divider;
-					codeRect.top = listY + (listItemHeight - textHeight)/2;
+					codeRect.top = (listItemHeight - textHeight)/2;
 					codeRect.right -= sizeBasis;
 					WCHAR ch[50];
 					wsprintf(ch, L"%03u %03u", (129 * (i+1) * whichCode) % 1000, (456 * (i+1) * whichCode)%1000);
 
 					RECT codeMeasureRect = codeRect;
-					DrawText(hdc, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
+					DrawText(itemDC, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
 					int codeWidth = codeMeasureRect.right - codeMeasureRect.left;
 
 
-					DrawText(hdc, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
+					DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
 					codeHitArea = codeRect;
 					codeHitArea.left = codeHitArea.right - codeWidth;
 					codeHitArea.bottom = codeMeasureRect.bottom;
@@ -775,12 +780,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 					int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
 
-					HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, max(listTop, codeRect.top), codeRect.right - codeWidth + pixelProgress, min(listBottom, codeRect.bottom));\
-					SelectClipRgn(hdc, redCode);
-					COLORREF oldColor = SetTextColor(hdc, TabForegroundColor(true));
-					DrawText(hdc, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
-					SetTextColor(hdc, oldColor);
-					SelectClipRgn(hdc, listRegion);
+					HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
+					SelectClipRgn(itemDC, redCode);
+					COLORREF oldColor = SetTextColor(itemDC, TabForegroundColor(true));
+					DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
+					SetTextColor(itemDC, oldColor);
+					SelectClipRgn(itemDC, NULL);
 					DeleteObject(redCode);
 					
 					// Time a redraw for when the above clipping region grows by a pixel.
@@ -793,17 +798,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 				RECT textRect = divider;
 				textRect.left = sizeBasis;
-				textRect.top = listY + (listItemHeight - textHeight)/2;
+				textRect.top = (listItemHeight - textHeight)/2;
 				WCHAR ch[50];
 				wsprintf(ch, L"Option %d", i+1);
-				DrawText(hdc, ch, -1, &textRect, DT_SINGLELINE);
+				DrawText(itemDC, ch, -1, &textRect, DT_SINGLELINE);
 
 
-				FillRect(hdc, &divider, dividerBrush);
+				FillRect(itemDC, &divider, dividerBrush);
+
+				BitBlt(hdc, 0, listY, scrollRect.left, listItemHeight, itemDC, 0,0, SRCCOPY);
 			}
 
 			SelectClipRgn(hdc, NULL);
 			EndPaint(hWnd, &ps);
+
+			DeleteObject(itemDC);
+			DeleteObject(itemBmp);
 
 			DeleteObject(dividerBrush);
 			DeleteObject(backgroundBrush);
