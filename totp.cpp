@@ -847,8 +847,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			} else {
 				SetSelectedItem(-1);
 			}
-			UpdateMouseCursor();
 		}
+		break;
+	case WM_SETCURSOR:
+		UpdateMouseCursor();
 		break;
 	case WM_LBUTTONDOWN:
 	case WM_RBUTTONDOWN:
