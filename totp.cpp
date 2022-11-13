@@ -20,12 +20,13 @@ INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 
 HWND mainWnd = NULL;
 
+HWND accountSearchEdit = NULL;
 HWND scroll = NULL;
 
 HFONT iconFont = NULL;
 HFONT font = NULL;
 
-int activeTab = IDC_TAB_ACCOUNTS;
+int activeTab = 0;
 int trackingMouseLeave = false;
 
 int codeDrawingProgressTimer = 0;
@@ -33,6 +34,15 @@ int codeDrawingProgressTimer = 0;
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
 
 HCURSOR handCursor = NULL, arrowCursor = NULL;
+
+
+RECT editArea;
+RECT scrollRect;
+int sizeBasis = 0;
+int bottomButtonHeight = 0;
+int textBoxHeight = 0;
+
+void SetActiveTab(int idc);
 
 int APIENTRY _tWinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
@@ -382,6 +392,67 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 }
 
 
+LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
+                               LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	PAINTSTRUCT ps;
+	HDC hdc;
+    switch (uMsg)
+    {
+	case WM_ERASEBKGND:
+		return TRUE;
+    case WM_PAINT:
+		hdc = BeginPaint(hWnd, &ps);
+		{
+			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_ADD);
+			int radius = sizeBasis/3;
+
+			HBITMAP corners = CreateRoundedCorner(hdc, RGB(240,30,30), RGB(240,30,30), RGB(255,255,255), radius);
+
+			HDC cornersDC = CreateCompatibleDC(hdc);
+			SelectObject(cornersDC, corners);
+			HBRUSH b = CreateSolidBrush(RGB(240,30,30));
+
+			RECT r;
+			GetClientRect(hWnd, &r);
+			
+			FillRect(hdc, &r, b);
+			BitBlt(hdc, r.left, r.top, radius, radius, cornersDC, 0,0,SRCCOPY);
+			BitBlt(hdc, r.right - radius, r.top, radius, radius, cornersDC, radius,0,SRCCOPY);
+			BitBlt(hdc, r.left, r.bottom - radius, radius, radius, cornersDC, 0,radius,SRCCOPY);
+			BitBlt(hdc, r.right - radius, r.bottom - radius, radius, radius, cornersDC, radius,radius,SRCCOPY);
+
+			HFONT oldFont = (HFONT)SelectObject(hdc, font);
+			SetTextColor(hdc, RGB(255,255,255));
+			SetBkMode(hdc, TRANSPARENT);
+			DrawText(hdc, L"Save", -1, &r, DT_SINGLELINE|DT_CENTER|DT_VCENTER);
+			SelectObject(hdc, oldFont);
+
+			if (GetFocus() == hWnd) {
+				RECT textRect = r;
+				DrawText(hdc, L"Save", -1, &textRect, DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_CALCRECT);
+
+				HBRUSH whiteBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
+				int textWidth = textRect.right - textRect.left;
+				RECT underlineRect;
+				underlineRect.left = (r.left + r.right - textWidth) / 2;
+				underlineRect.right = underlineRect.left + textWidth;
+				underlineRect.top = textRect.bottom + 1;
+				underlineRect.bottom = underlineRect.top + 1;
+				FillRect(hdc, &underlineRect, whiteBrush);
+			}
+
+			DeleteDC(cornersDC);
+			DeleteObject(corners);
+
+			EndPaint(hWnd, &ps);
+		}
+        return TRUE;
+    } 
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+
 struct HintingEditData {
 	BOOL showingHint;
 	BOOL hasFocus;
@@ -389,6 +460,8 @@ struct HintingEditData {
 };
 
 HintingEditData searchHintingEditData = { TRUE, FALSE, L"Search..." };
+HintingEditData addAccountTabNameEditData = { TRUE, FALSE, L"e.g. example.com" };
+HintingEditData addAccountTabCodeEditData = { TRUE, FALSE, L"e.g. L9WPBRYZLHALSNMW" };
 
 //
 //   FUNCTION: InitInstance(HINSTANCE, int)
@@ -400,10 +473,95 @@ HintingEditData searchHintingEditData = { TRUE, FALSE, L"Search..." };
 //        In this function, we save the instance handle in a global variable and
 //        create and display the main program window.
 //
-RECT editArea;
-RECT scrollRect;
-int sizeBasis = 0;
-int bottomButtonHeight = 0;
+
+HWND CreateHintingEdit(RECT r, int idc, HintingEditData *hintData)
+{
+	HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, r.left,r.top, r.right - r.left,r.bottom - r.top, mainWnd, (HMENU)idc, NULL, NULL);
+	SetWindowLongPtr(edit, GWLP_USERDATA, (LONG)hintData);
+	SetWindowText(edit, hintData->hintText);
+	SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
+	return edit;
+}
+
+void InitAccountsTab()
+{
+	accountSearchEdit = CreateHintingEdit(editArea, IDC_SEARCH, &searchHintingEditData);
+   
+	scroll = CreateWindowEx( 0, // no extended styles 
+		L"SCROLLBAR",           // scroll bar control class 
+		(PTSTR) NULL,           // no window text 
+		WS_CHILD | WS_VISIBLE   // window styles  
+			| SBS_VERT,         // vertical scroll bar style 
+		scrollRect.left,              // horizontal position 
+		scrollRect.top, // vertical position 
+		scrollRect.right - scrollRect.left,             // width of the scroll bar 
+		scrollRect.bottom - scrollRect.top,               // height of the scroll bar
+		mainWnd,             // handle to main window 
+		(HMENU) NULL,           // no menu 
+		hInst,                // instance owning this window 
+		(PVOID) NULL            // pointer not needed 
+		);
+
+	SCROLLINFO info = { 0 };
+	info.cbSize = sizeof(info);
+	info.fMask = SIF_RANGE | SIF_PAGE;
+	info.nMax = 20 * sizeBasis*4;
+	info.nPage = sizeBasis*4*10;
+	SetScrollInfo(scroll, SB_CTL, &info, FALSE);
+}
+
+void DestroyAccountsTab()
+{
+	DestroyWindow(accountSearchEdit);
+	DestroyWindow(scroll);
+}
+
+
+struct {
+	HWND nameEdit;
+	RECT nameEditArea;
+	HWND codeEdit;
+	RECT codeEditArea;
+	HWND saveButton;
+} addAccountTab = { 0 };
+
+void InitAddTab()
+{
+	RECT mainRect;
+	GetClientRect(mainWnd, &mainRect);
+
+	int textBoxMargin = sizeBasis*3;
+	addAccountTab.nameEditArea.left = textBoxMargin;
+	addAccountTab.nameEditArea.top = sizeBasis*8;
+	addAccountTab.nameEditArea.right = mainRect.right - textBoxMargin;
+	addAccountTab.nameEditArea.bottom = addAccountTab.nameEditArea.top + textBoxHeight;
+
+	addAccountTab.nameEdit = CreateHintingEdit(addAccountTab.nameEditArea, IDC_NAME, &addAccountTabNameEditData);
+
+	addAccountTab.codeEditArea = addAccountTab.nameEditArea;
+	addAccountTab.codeEditArea.top += textBoxHeight + sizeBasis*5;
+	addAccountTab.codeEditArea.bottom += textBoxHeight + sizeBasis*5;
+	addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, &addAccountTabCodeEditData);
+
+	int saveButtonWidth = sizeBasis * 8;
+	RECT saveButtonRect = addAccountTab.codeEditArea;
+	saveButtonRect.left = (mainRect.left + mainRect.right - saveButtonWidth)/2;
+	saveButtonRect.right = saveButtonRect.left + saveButtonWidth;
+	saveButtonRect.top = addAccountTab.codeEditArea.bottom + sizeBasis*3;
+	saveButtonRect.bottom = saveButtonRect.top + sizeBasis*5/2;
+	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
+	SetWindowText(addAccountTab.saveButton, L"Save");
+
+	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
+}
+void DestroyAddTab()
+{
+	DestroyWindow(addAccountTab.nameEdit);
+	DestroyWindow(addAccountTab.codeEdit);
+	DestroyWindow(addAccountTab.saveButton);
+}
+
+
 
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
@@ -435,6 +593,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    TEXTMETRIC tm = {0};
    GetTextMetrics (dc, &tm);
    SelectObject(dc, oldObj);
+   textBoxHeight = tm.tmHeight;
 
    int editMargin = sizeBasis*3/2;
    
@@ -444,43 +603,14 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    editArea.left = editMargin;
    editArea.top = editMargin;
    editArea.right = clientRect.right - editMargin;
-   editArea.bottom = editArea.top + tm.tmHeight;
+   editArea.bottom = editArea.top + textBoxHeight;
 
    scrollRect = clientRect;
    scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
    scrollRect.top = editArea.bottom + editMargin;
    scrollRect.bottom -= bottomButtonHeight;
 
-   HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, editArea.left,editArea.top, editArea.right - editArea.left,editArea.bottom - editArea.top, hWnd, (HMENU)IDC_SEARCH, NULL, NULL);
-   SetWindowLongPtr(edit, GWLP_USERDATA, (LONG)&searchHintingEditData);
-   SetWindowText(edit, searchHintingEditData.hintText);
-
    
-   SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
-   
-
-   scroll = CreateWindowEx( 0, // no extended styles 
-            L"SCROLLBAR",           // scroll bar control class 
-            (PTSTR) NULL,           // no window text 
-            WS_CHILD | WS_VISIBLE   // window styles  
-                | SBS_VERT,         // vertical scroll bar style 
-            scrollRect.left,              // horizontal position 
-            scrollRect.top, // vertical position 
-			scrollRect.right - scrollRect.left,             // width of the scroll bar 
-			scrollRect.bottom - scrollRect.top,               // height of the scroll bar
-            hWnd,             // handle to main window 
-            (HMENU) NULL,           // no menu 
-            hInstance,                // instance owning this window 
-            (PVOID) NULL            // pointer not needed 
-			);
-
-   SCROLLINFO info = { 0 };
-   info.cbSize = sizeof(info);
-   info.fMask = SIF_RANGE | SIF_PAGE;
-   info.nMax = 20 * sizeBasis*4;
-   info.nPage = sizeBasis*4*10;
-   SetScrollInfo(scroll, SB_CTL, &info, FALSE);
-
    HWND accountsTabWnd = CreateWindowEx( 0,
 	   L"BUTTON",
 	   L"Accounts",
@@ -501,6 +631,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    SetWindowSubclass(scanTabWnd, ScanButtonProc, 0, 0);
    SetWindowSubclass(addTabWnd, AddButtonProc, 0, 0);
    SetWindowSubclass(accountsTabWnd, AccountsButtonProc, 0, 0);
+
+   SetActiveTab(IDC_TAB_ACCOUNTS);
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
@@ -554,9 +686,26 @@ HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF o
 
 void SetActiveTab(int idc)
 {
+	if (activeTab == idc) return;
+
+	
+	switch (activeTab) {
+	case IDC_TAB_ACCOUNTS: DestroyAccountsTab(); break;
+	case IDC_TAB_ADD: DestroyAddTab(); break;
+	}
+
 	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
 	activeTab = idc;
 	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
+
+	
+	switch (activeTab) {
+	case IDC_TAB_ACCOUNTS: InitAccountsTab(); break;
+	case IDC_TAB_ADD: InitAddTab(); break;
+	}
+
+	InvalidateRect(mainWnd, NULL, TRUE);
+
 }
 
 void InvalidateAccountList() {
@@ -582,7 +731,199 @@ RECT codeHitArea = { 0 };
 POINT mousePoint = { 0 };
 
 void UpdateMouseCursor() {
-	SetCursor( selectedItem>=0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor );
+	if (activeTab == IDC_TAB_ACCOUNTS) {
+		SetCursor( selectedItem>=0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor );
+	}
+}
+
+void PaintEdits(HDC hdc, RECT *rects, int nRects)
+{
+	int radius = sizeBasis/3;
+	int margin = 2*radius;
+	HBITMAP textBoxCorners = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius);
+	HBRUSH br = CreateSolidBrush(RGB(200,200,200));
+	HDC src = CreateCompatibleDC(hdc);
+
+	int marginOnly = margin-radius;
+	SelectObject(src, textBoxCorners);
+	for (int i=0; i<nRects; i++) {
+		RECT rect = rects[i];
+		BitBlt(hdc, rect.left-margin,rect.top-margin,radius,radius,src,0,0,SRCCOPY);
+		BitBlt(hdc, rect.right+margin-radius,rect.top-margin,radius,radius,src,radius,0,SRCCOPY);
+		BitBlt(hdc, rect.left-margin,rect.bottom+margin-radius,radius,radius,src,0,radius,SRCCOPY);
+		BitBlt(hdc, rect.right+margin-radius,rect.bottom+margin-radius,radius,radius,src,radius,radius,SRCCOPY);
+
+		RECT r;
+			
+		r = rect; r.top = rect.top-margin; r.bottom = r.top + 1; r.left -= marginOnly; r.right += marginOnly;
+		FillRect(hdc, &r, br);
+
+		r.bottom = rect.bottom+margin; r.top = r.bottom - 1;
+		FillRect(hdc, &r, br);
+			
+		r = rect; r.left = rect.left-margin; r.right = r.left + 1; r.top -= marginOnly; r.bottom += marginOnly;
+		FillRect(hdc, &r, br);
+
+		r.right = rect.right + margin; r.left = r.right - 1;
+		FillRect(hdc, &r, br);
+	}
+
+	DeleteDC(src);
+	DeleteObject(textBoxCorners);
+}
+
+int GetTextHeight(HDC hdc)
+{
+	RECT measureRect = {0};
+	DrawText(hdc, L"O", 1, &measureRect, DT_SINGLELINE|DT_CALCRECT);
+	return measureRect.bottom - measureRect.top;
+}
+
+void PaintAccounts(HDC hdc)
+{
+	PaintEdits(hdc, &editArea, 1);
+
+	RECT area;
+	GetClientRect(mainWnd, &area);
+	int listTop = scrollRect.top;
+	int listBottom = area.bottom - bottomButtonHeight;
+	int listItemHeight = ListItemHeight();
+	int dividerHeight = sizeBasis/6;
+
+	HRGN listRegion = CreateRectRgn(area.left, listTop, scrollRect.left, listBottom); 
+	SelectClipRgn (hdc, listRegion);
+
+	HBRUSH dividerBrush = CreateSolidBrush(RGB(230,230,230));
+	HBRUSH backgroundBrush = CreateSolidBrush(RGB(255,255,255));
+			
+	HBITMAP itemBmp = CreateCompatibleBitmap(hdc, scrollRect.left, listItemHeight);
+	HDC itemDC = CreateCompatibleDC(hdc);
+	SelectObject(itemDC, itemBmp);
+
+	SelectObject(itemDC, font);
+
+	int textHeight = GetTextHeight(hdc);
+
+	// Draw the actual list of accounts
+	int pos = GetScrollPos(scroll, SB_CTL);
+	for (int i=0, listY = listTop - pos; i<20; i++, listY += listItemHeight) {
+		if (listY + listItemHeight < listTop) continue;
+		if (listY > listBottom) break;
+		RECT divider;
+		divider.left = 0;
+		divider.right = scrollRect.left;
+		divider.top = listItemHeight - dividerHeight;
+		divider.bottom = listItemHeight;
+
+		RECT itemArea = divider;
+		itemArea.top = 0;
+		itemArea.bottom = listItemHeight - dividerHeight;
+		FillRect(itemDC, &itemArea, backgroundBrush);
+
+		if (i == selectedItem) {
+			FILETIME now;
+			GetSystemTimeAsFileTime(&now);
+			int millisPerCode = 30000;
+			LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
+			int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
+			int whichCode = (int)((millisecondsSinceEpoch / millisPerCode) % 20) + 1;
+
+			RECT codeRect = divider;
+			codeRect.top = (listItemHeight - textHeight)/2;
+			codeRect.right -= sizeBasis;
+			WCHAR ch[50];
+			wsprintf(ch, L"%03u %03u", (129 * (i+1) * whichCode) % 1000, (456 * (i+1) * whichCode)%1000);
+
+			RECT codeMeasureRect = codeRect;
+			DrawText(itemDC, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
+			int codeWidth = codeMeasureRect.right - codeMeasureRect.left;
+
+
+			DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
+			codeHitArea = codeRect;
+			codeHitArea.top += listY;
+			codeHitArea.left = codeHitArea.right - codeWidth;
+			codeHitArea.bottom = codeMeasureRect.bottom + listY;
+			UpdateMouseCursor();
+
+			int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
+
+			HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
+			SelectClipRgn(itemDC, redCode);
+			COLORREF oldColor = SetTextColor(itemDC, TabForegroundColor(true));
+			DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
+			SetTextColor(itemDC, oldColor);
+			SelectClipRgn(itemDC, NULL);
+			DeleteObject(redCode);
+					
+			// Time a redraw for when the above clipping region grows by a pixel.
+			if (codeDrawingProgressTimer) {
+				KillTimer(mainWnd, codeDrawingProgressTimer);
+			}
+			int nextPixelMillis = (pixelProgress + 1) * millisPerCode / codeWidth;
+			codeDrawingProgressTimer = SetTimer(mainWnd, ID_CODE_DRAWING_PROGRESS, nextPixelMillis - milliSecondsIntoCode + 10, NULL); // 10ms is an unnoticable slop, in case the WM_TIMER timing is not very accurate
+		}
+
+		RECT textRect = divider;
+		textRect.left = sizeBasis;
+		textRect.top = (listItemHeight - textHeight)/2;
+		WCHAR ch[50];
+		wsprintf(ch, L"Option %d", i+1);
+		DrawText(itemDC, ch, -1, &textRect, DT_SINGLELINE);
+
+
+		FillRect(itemDC, &divider, dividerBrush);
+
+		BitBlt(hdc, 0, listY, scrollRect.left, listItemHeight, itemDC, 0,0, SRCCOPY);
+	}
+
+	SelectClipRgn(hdc, NULL);
+
+	DeleteObject(itemDC);
+	DeleteObject(itemBmp);
+
+	DeleteObject(dividerBrush);
+	DeleteObject(backgroundBrush);
+	DeleteObject(listRegion);
+}
+
+void PaintAddTab(HDC hdc)
+{
+	RECT edits[2] = { addAccountTab.nameEditArea, addAccountTab.codeEditArea };
+	PaintEdits(hdc, edits, 2);
+
+	HFONT oldFont = (HFONT)SelectObject(hdc, font);
+
+	int textHeight = GetTextHeight(hdc);
+
+	RECT clientRect;
+	GetClientRect(mainWnd, &clientRect);
+
+	SetTextColor(hdc, RGB(240,30,30));
+
+	int labelAboveField = sizeBasis;
+
+	RECT labelRect;
+	labelRect.left = addAccountTab.nameEditArea.left;
+	labelRect.right = addAccountTab.nameEditArea.right;
+	labelRect.bottom = addAccountTab.nameEditArea.top - labelAboveField;
+	labelRect.top = labelRect.bottom - textHeight;
+	DrawText(hdc, L"Account Name", -1, &labelRect, DT_SINGLELINE);
+	
+	labelRect.bottom = addAccountTab.codeEditArea.top - labelAboveField;
+	labelRect.top = labelRect.bottom - textHeight;
+	DrawText(hdc, L"Secret Code", -1, &labelRect, DT_SINGLELINE);
+
+	RECT advancedRect;
+	advancedRect.bottom = clientRect.bottom - bottomButtonHeight - sizeBasis;
+	advancedRect.right = clientRect.right - sizeBasis;
+	advancedRect.left = 0;
+	advancedRect.top = advancedRect.bottom - textHeight;
+	SetTextColor(hdc, RGB(0,0,0));
+	DrawText(hdc, L"Advanced...", -1, &advancedRect, DT_SINGLELINE|DT_RIGHT);
+
+	SelectObject(hdc, oldFont);
+
 }
 
 //
@@ -616,6 +957,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			DestroyWindow(hWnd);
 			break;
 		case IDC_SEARCH:
+		case IDC_NAME:
+		case IDC_CODE:
 			{
 				switch (wmEvent) {
 				case EN_SETFOCUS:
@@ -668,156 +1011,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 		}
 		break;
-	case WM_ERASEBKGND:
-		break;
+	//case WM_ERASEBKGND:
+	//	break;
 	case WM_PAINT:
 		{
 			hdc = BeginPaint(hWnd, &ps);
 
-			{
-				int radius = 5;
-				int margin = radius + 5;
-				HBITMAP textBoxCorners = CreateRoundedCorner(hdc, RGB(255,255,255), RGB(200,200,200), RGB(255,255,255), radius);
-				HDC src = CreateCompatibleDC(hdc);
-
-				SelectObject(src, textBoxCorners);
-				BitBlt(hdc, editArea.left-margin,editArea.top-margin,radius,radius,src,0,0,SRCCOPY);
-				BitBlt(hdc, editArea.right+margin-radius,editArea.top-margin,radius,radius,src,radius,0,SRCCOPY);
-				BitBlt(hdc, editArea.left-margin,editArea.bottom+margin-radius,radius,radius,src,0,radius,SRCCOPY);
-				BitBlt(hdc, editArea.right+margin-radius,editArea.bottom+margin-radius,radius,radius,src,radius,radius,SRCCOPY);
-
-				DeleteDC(src);
-				DeleteObject(textBoxCorners);
-
-				HBRUSH br = CreateSolidBrush(RGB(200,200,200));
-
-				int marginOnly = margin-radius;
-
-				RECT r;
-			
-				r = editArea; r.top = editArea.top-margin; r.bottom = r.top + 1; r.left -= marginOnly; r.right += marginOnly;
-				FillRect(hdc, &r, br);
-
-				r.bottom = editArea.bottom+margin; r.top = r.bottom - 1;
-				FillRect(hdc, &r, br);
-			
-				r = editArea; r.left = editArea.left-margin; r.right = r.left + 1; r.top -= marginOnly; r.bottom += marginOnly;
-				FillRect(hdc, &r, br);
-
-				r.right = editArea.right + margin; r.left = r.right - 1;
-				FillRect(hdc, &r, br);
+			if (activeTab == IDC_TAB_ACCOUNTS) {
+				PaintAccounts(hdc);
+			} else if (activeTab == IDC_TAB_ADD) {
+				PaintAddTab(hdc);
 			}
 
-
-
-			RECT area;
-			GetClientRect(hWnd, &area);
-			int listTop = scrollRect.top;
-			int listBottom = area.bottom - bottomButtonHeight;
-			int listItemHeight = ListItemHeight();
-			int dividerHeight = sizeBasis/6;
-
-			HRGN listRegion = CreateRectRgn(area.left, listTop, scrollRect.left, listBottom); 
-			SelectClipRgn (hdc, listRegion);
-
-			HBRUSH dividerBrush = CreateSolidBrush(RGB(230,230,230));
-			HBRUSH backgroundBrush = CreateSolidBrush(RGB(255,255,255));
-			
-			HBITMAP itemBmp = CreateCompatibleBitmap(hdc, scrollRect.left, listItemHeight);
-			HDC itemDC = CreateCompatibleDC(hdc);
-			SelectObject(itemDC, itemBmp);
-
-			SelectObject(itemDC, font);
-
-			int textHeight;
-			{
-				RECT measureRect = area;
-				DrawText(hdc, L"O", 1, &measureRect, DT_SINGLELINE|DT_CALCRECT);
-				textHeight = measureRect.bottom - measureRect.top;
-			}
-
-
-			// Draw the actual list of accounts
-			int pos = GetScrollPos(scroll, SB_CTL);
-			for (int i=0, listY = listTop - pos; i<20; i++, listY += listItemHeight) {
-				if (listY + listItemHeight < listTop) continue;
-				if (listY > listBottom) break;
-				RECT divider;
-				divider.left = 0;
-				divider.right = scrollRect.left;
-				divider.top = listItemHeight - dividerHeight;
-				divider.bottom = listItemHeight;
-
-				RECT itemArea = divider;
-				itemArea.top = 0;
-				itemArea.bottom = listItemHeight - dividerHeight;
-				FillRect(itemDC, &itemArea, backgroundBrush);
-
-				if (i == selectedItem) {
-					FILETIME now;
-					GetSystemTimeAsFileTime(&now);
-					int millisPerCode = 30000;
-					LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
-					int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
-					int whichCode = (int)((millisecondsSinceEpoch / millisPerCode) % 20) + 1;
-
-					RECT codeRect = divider;
-					codeRect.top = (listItemHeight - textHeight)/2;
-					codeRect.right -= sizeBasis;
-					WCHAR ch[50];
-					wsprintf(ch, L"%03u %03u", (129 * (i+1) * whichCode) % 1000, (456 * (i+1) * whichCode)%1000);
-
-					RECT codeMeasureRect = codeRect;
-					DrawText(itemDC, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
-					int codeWidth = codeMeasureRect.right - codeMeasureRect.left;
-
-
-					DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
-					codeHitArea = codeRect;
-					codeHitArea.left = codeHitArea.right - codeWidth;
-					codeHitArea.bottom = codeMeasureRect.bottom;
-					UpdateMouseCursor();
-
-					int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
-
-					HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
-					SelectClipRgn(itemDC, redCode);
-					COLORREF oldColor = SetTextColor(itemDC, TabForegroundColor(true));
-					DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
-					SetTextColor(itemDC, oldColor);
-					SelectClipRgn(itemDC, NULL);
-					DeleteObject(redCode);
-					
-					// Time a redraw for when the above clipping region grows by a pixel.
-					if (codeDrawingProgressTimer) {
-						KillTimer(mainWnd, codeDrawingProgressTimer);
-					}
-					int nextPixelMillis = (pixelProgress + 1) * millisPerCode / codeWidth;
-					codeDrawingProgressTimer = SetTimer(mainWnd, ID_CODE_DRAWING_PROGRESS, nextPixelMillis - milliSecondsIntoCode + 10, NULL); // 10ms is an unnoticable slop, in case the WM_TIMER timing is not very accurate
-				}
-
-				RECT textRect = divider;
-				textRect.left = sizeBasis;
-				textRect.top = (listItemHeight - textHeight)/2;
-				WCHAR ch[50];
-				wsprintf(ch, L"Option %d", i+1);
-				DrawText(itemDC, ch, -1, &textRect, DT_SINGLELINE);
-
-
-				FillRect(itemDC, &divider, dividerBrush);
-
-				BitBlt(hdc, 0, listY, scrollRect.left, listItemHeight, itemDC, 0,0, SRCCOPY);
-			}
-
-			SelectClipRgn(hdc, NULL);
 			EndPaint(hWnd, &ps);
-
-			DeleteObject(itemDC);
-			DeleteObject(itemBmp);
-
-			DeleteObject(dividerBrush);
-			DeleteObject(backgroundBrush);
-			DeleteObject(listRegion);
 		}
 		break;
 	case WM_TIMER:
