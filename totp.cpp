@@ -646,17 +646,22 @@ void InitAddTab()
 	RECT mainRect;
 	GetClientRect(mainWnd, &mainRect);
 
-	int textBoxMargin = sizeBasis*3;
-	addAccountTab.nameEditArea.left = textBoxMargin;
-	addAccountTab.nameEditArea.top = sizeBasis*4;//sizeBasis*8; for simple mode
-	addAccountTab.nameEditArea.right = mainRect.right - textBoxMargin;
+	int margin = sizeBasis;
+
+	int componentTop = mainRect.top + margin;
+	int componentBottom = mainRect.bottom - bottomButtonHeight - margin - sizeBasis*3;
+	int componentPlacementFromTop = sizeBasis*3/2;
+	int textBoxMargin = sizeBasis*2/3;
+	addAccountTab.nameEditArea.left = margin + textBoxMargin;
+	addAccountTab.nameEditArea.top = componentTop + (componentBottom - componentTop) * 0 / 5 + componentPlacementFromTop + textBoxMargin;
+	addAccountTab.nameEditArea.right = mainRect.right - margin - textBoxMargin;
 	addAccountTab.nameEditArea.bottom = addAccountTab.nameEditArea.top + textBoxHeight;
 
 	addAccountTab.nameEdit = CreateHintingEdit(addAccountTab.nameEditArea, IDC_NAME, &addAccountTabNameEditData);
 
 	addAccountTab.codeEditArea = addAccountTab.nameEditArea;
-	addAccountTab.codeEditArea.top += textBoxHeight + sizeBasis*5;
-	addAccountTab.codeEditArea.bottom += textBoxHeight + sizeBasis*5;
+	addAccountTab.codeEditArea.top = componentTop + (componentBottom - componentTop) * 1 / 5 + componentPlacementFromTop + textBoxMargin;
+	addAccountTab.codeEditArea.bottom = addAccountTab.codeEditArea.top + textBoxHeight;
 	addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, &addAccountTabCodeEditData);
 
 	addAccountTab.advancedMode = false;
@@ -680,24 +685,21 @@ void InitAddTab()
 	};
 
 	RECT radioArea;
-	radioArea.top = addAccountTab.codeEditArea.bottom + sizeBasis*4;
 	int radioButtonHeight = textBoxHeight + sizeBasis;
-	radioArea.bottom = radioArea.top + radioButtonHeight;
 	for (int buttonSet=0; buttonSet<3; buttonSet++) {
-		radioArea.left = sizeBasis*2;
+		radioArea.top = componentTop + (componentBottom - componentTop) * (buttonSet+2) / 5 + componentPlacementFromTop;
+		radioArea.bottom = radioArea.top + radioButtonHeight;
 		for (int i=0; i<3; i++) {
+			radioArea.left = margin + (mainRect.right - margin - margin) * i / 3;
+			radioArea.right = margin + (mainRect.right - margin - margin) * (i+1) / 3;
+
 			TabParam tabParam = wnds[buttonSet][i];
-			radioArea.right = radioArea.left + sizeBasis*7;
 			*tabParam.wnd = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
 			SetWindowText(*tabParam.wnd, tabParam.text);
 			SendMessage(*tabParam.wnd, WM_SETFONT, (WPARAM)font, 0);
 			SetWindowSubclass(*tabParam.wnd, RadioButtonProc, 0, 0);
-			
-			radioArea.left += sizeBasis*7;
 		}
 		
-		radioArea.top += sizeBasis*4;
-		radioArea.bottom = radioArea.top + radioButtonHeight;
 	}
 
 	/*RECT advancedButtonRect = addAccountTab.codeEditArea;
@@ -1076,28 +1078,25 @@ void PaintAddTab(HDC hdc)
 
 	int labelAboveField = sizeBasis;
 
+	int componentTop = clientRect.top + sizeBasis;
+	int componentBottom = clientRect.bottom - bottomButtonHeight - sizeBasis - sizeBasis*3;
+
 	RECT labelRect;
 	labelRect.left = addAccountTab.nameEditArea.left;
 	labelRect.right = addAccountTab.nameEditArea.right;
-	labelRect.bottom = addAccountTab.nameEditArea.top - labelAboveField;
-	labelRect.top = labelRect.bottom - textHeight;
-	DrawText(hdc, L"Account Name", -1, &labelRect, DT_SINGLELINE);
-	
-	labelRect.bottom = addAccountTab.codeEditArea.top - labelAboveField;
-	labelRect.top = labelRect.bottom - textHeight;
-	DrawText(hdc, L"Secret Code", -1, &labelRect, DT_SINGLELINE);
 
-	labelRect.top = labelRect.bottom + sizeBasis*5;
-	labelRect.bottom = labelRect.top + textHeight;
-	DrawText(hdc, L"Token Length", -1, &labelRect, DT_SINGLELINE);
-
-	labelRect.top += sizeBasis*4;
-	labelRect.bottom += sizeBasis*4;
-	DrawText(hdc, L"Algorithm", -1, &labelRect, DT_SINGLELINE);
-	
-	labelRect.top += sizeBasis*4;
-	labelRect.bottom += sizeBasis*4;
-	DrawText(hdc, L"Token Rotates Every...", -1, &labelRect, DT_SINGLELINE);
+	WCHAR *labels[] = {
+		L"Account Name",
+		L"Secret Code",
+		L"Token Length",
+		L"Algorithm",
+		L"Token Rotates Every..."
+	};
+	for (int i=0; i<5; i++) {
+		labelRect.top = componentTop + (componentBottom - componentTop) * i / 5;
+		labelRect.bottom = labelRect.top + textHeight;
+		DrawText(hdc, labels[i], -1, &labelRect, DT_SINGLELINE);
+	}
 
 
 	/*RECT advancedRect;
