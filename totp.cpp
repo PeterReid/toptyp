@@ -117,8 +117,8 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 	wcex.hInstance		= hInstance;
 	wcex.hIcon			= LoadIcon(hInstance, MAKEINTRESOURCE(IDI_TOTP));
 	wcex.hCursor		= LoadCursor(NULL, IDC_ARROW);
-	wcex.hbrBackground	= (HBRUSH)(COLOR_WINDOW+1);
 	wcex.lpszMenuName	= MAKEINTRESOURCE(IDC_TOTP);
+	wcex.hbrBackground	= (HBRUSH)(COLOR_WINDOW+1);
 	wcex.lpszClassName	= szWindowClass;
 	wcex.hIconSm		= LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
 
@@ -452,6 +452,104 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+#include <windowsx.h>
+
+LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
+                               LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	PAINTSTRUCT ps;
+	HDC hdc;
+	switch (uMsg)
+	{
+	case WM_ERASEBKGND:
+		return TRUE;
+	case WM_PAINT:
+		hdc = BeginPaint(hWnd, &ps);
+		{
+			bool checked = (Button_GetState(hWnd) & BST_CHECKED) != 0;
+
+			HWND next = GetWindow(hWnd, GW_HWNDNEXT);
+			if (GetWindowStyle(next) & WS_GROUP) next = NULL;
+
+			HWND prev = GetWindowStyle(hWnd) & WS_GROUP ? NULL : GetWindow(hWnd, GW_HWNDPREV);
+			bool prevChecked = prev && (Button_GetState(prev) & BST_CHECKED) != 0;
+
+			if (next) {
+				bool wasChecked = GetWindowLong(hWnd, GWLP_USERDATA) != 0;
+				if (wasChecked != checked) {
+					WCHAR nextText[256];
+					GetWindowText(next, nextText, 255);
+					SetWindowLong(hWnd, GWLP_USERDATA, (LONG)checked);
+					InvalidateRect(next, NULL, FALSE);
+				}
+			}
+			COLORREF foreground = checked ? RGB(240,30,30): RGB(200,200,200);
+
+			int radius = sizeBasis/3;
+			HBITMAP corners = CreateRoundedCorner(hdc, RGB(255,255,255), foreground, RGB(255,255,255), radius);
+
+			HDC cornersDC = CreateCompatibleDC(hdc);
+			SelectObject(cornersDC, corners);
+			HBRUSH b = CreateSolidBrush(RGB(255,255,255));
+			HBRUSH selectedBrush = CreateSolidBrush(RGB(240,30,30));
+
+			RECT r;
+			GetClientRect(hWnd, &r);
+			
+			FillRect(hdc, &r, b);
+
+			HBRUSH foregroundBrush = CreateSolidBrush(foreground);
+			RECT lineRect;
+
+			lineRect = r;
+			lineRect.bottom = lineRect.top + 1;
+			FillRect(hdc, &lineRect, foregroundBrush);
+
+			lineRect = r;
+			lineRect.top = lineRect.bottom - 1;
+			FillRect(hdc, &lineRect, foregroundBrush);
+			
+			lineRect = r;
+			lineRect.right = lineRect.left + 1;
+			FillRect(hdc, &lineRect, prevChecked ? selectedBrush : foregroundBrush); // The left edge will show as selected if either of its neighbors is selected.
+			
+			if (!next) { // To avoid doubling up the line between adjacent choices, we don't draw the right edge (unless this button is the rightmost).
+				lineRect = r;
+				lineRect.left = lineRect.right - 1;
+				FillRect(hdc, &lineRect, foregroundBrush);
+			}
+
+			if (!prev) { // If we are the first in this set of options, we need to round out the left corners.
+				BitBlt(hdc, r.left, r.top, radius, radius, cornersDC, 0,0,SRCCOPY);
+				BitBlt(hdc, r.left, r.bottom - radius, radius, radius, cornersDC, 0,radius,SRCCOPY);
+			}
+			if (!next) { // If we are the last in this set of options, we need to round out the right corners.
+				BitBlt(hdc, r.right - radius, r.bottom - radius, radius, radius, cornersDC, radius,radius,SRCCOPY);
+				BitBlt(hdc, r.right - radius, r.top, radius, radius, cornersDC, radius,0,SRCCOPY);
+			}
+
+			HFONT oldFont = (HFONT)SelectObject(hdc, font);
+			SetTextColor(hdc, foreground);
+			SetBkMode(hdc, TRANSPARENT);
+			WCHAR labelText[256];
+			GetWindowText(hWnd, labelText, sizeof(labelText));
+			DrawText(hdc, labelText, -1, &r, DT_SINGLELINE|DT_CENTER|DT_VCENTER);
+			SelectObject(hdc, oldFont);
+
+			DeleteDC(cornersDC);
+			DeleteObject(corners);
+			DeleteObject(b);
+			DeleteObject(foregroundBrush);
+			DeleteObject(selectedBrush);
+
+			EndPaint(hWnd, &ps);
+		}
+        return TRUE;
+    }
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
+
 
 struct HintingEditData {
 	BOOL showingHint;
@@ -523,7 +621,25 @@ struct {
 	HWND codeEdit;
 	RECT codeEditArea;
 	HWND saveButton;
+	HWND tokenLength6, tokenLength8, tokenLength10;
+	HWND algorithmSha1, algorithmSha256, algorithmSha512;
+	HWND period15, period30, period60;
+	HWND advancedButton;
+	bool advancedMode;
 } addAccountTab = { 0 };
+
+struct TabParam {
+	HWND *wnd;
+	int idc;
+	const WCHAR *text;
+};
+TabParam MakeTabParam(HWND *wnd, int idc, const WCHAR *text) {
+	TabParam p;
+	p.wnd = wnd;
+	p.idc = idc;
+	p.text = text;
+	return p;
+}
 
 void InitAddTab()
 {
@@ -532,7 +648,7 @@ void InitAddTab()
 
 	int textBoxMargin = sizeBasis*3;
 	addAccountTab.nameEditArea.left = textBoxMargin;
-	addAccountTab.nameEditArea.top = sizeBasis*8;
+	addAccountTab.nameEditArea.top = sizeBasis*4;//sizeBasis*8; for simple mode
 	addAccountTab.nameEditArea.right = mainRect.right - textBoxMargin;
 	addAccountTab.nameEditArea.bottom = addAccountTab.nameEditArea.top + textBoxHeight;
 
@@ -543,22 +659,79 @@ void InitAddTab()
 	addAccountTab.codeEditArea.bottom += textBoxHeight + sizeBasis*5;
 	addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, &addAccountTabCodeEditData);
 
+	addAccountTab.advancedMode = false;
+
+	TabParam wnds[3][3] = {
+		{
+			MakeTabParam(&addAccountTab.tokenLength6, 0, L"6"),
+			MakeTabParam(&addAccountTab.tokenLength8, 0, L"8"),
+			MakeTabParam(&addAccountTab.tokenLength10, 0, L"10"),
+		},
+		{
+			MakeTabParam(&addAccountTab.algorithmSha1, 0, L"SHA-1"),
+			MakeTabParam(&addAccountTab.algorithmSha256, 0, L"SHA-256"),
+			MakeTabParam(&addAccountTab.algorithmSha512, 0, L"SHA-512"),
+		},
+		{
+			MakeTabParam(&addAccountTab.period15, 0, L"15 seconds"),
+			MakeTabParam(&addAccountTab.period30, 0, L"30 seconds"),
+			MakeTabParam(&addAccountTab.period60, 0, L"60 seconds"),
+		}
+	};
+
+	RECT radioArea;
+	radioArea.top = addAccountTab.codeEditArea.bottom + sizeBasis*4;
+	int radioButtonHeight = textBoxHeight + sizeBasis;
+	radioArea.bottom = radioArea.top + radioButtonHeight;
+	for (int buttonSet=0; buttonSet<3; buttonSet++) {
+		radioArea.left = sizeBasis*2;
+		for (int i=0; i<3; i++) {
+			TabParam tabParam = wnds[buttonSet][i];
+			radioArea.right = radioArea.left + sizeBasis*7;
+			*tabParam.wnd = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
+			SetWindowText(*tabParam.wnd, tabParam.text);
+			SendMessage(*tabParam.wnd, WM_SETFONT, (WPARAM)font, 0);
+			SetWindowSubclass(*tabParam.wnd, RadioButtonProc, 0, 0);
+			
+			radioArea.left += sizeBasis*7;
+		}
+		
+		radioArea.top += sizeBasis*4;
+		radioArea.bottom = radioArea.top + radioButtonHeight;
+	}
+
+	/*RECT advancedButtonRect = addAccountTab.codeEditArea;
+	
+	advancedButtonRect.bottom = mainRect.bottom - bottomButtonHeight - sizeBasis;
+	advancedButtonRect.right = mainRect.right - sizeBasis;
+	advancedButtonRect.left = 0;
+	advancedButtonRect.top = mainRect.bottom - textBoxHeight;
+	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
+	SetWindowText(addAccountTab.advancedButton, L"Advanced...");*/
+
+	
 	int saveButtonWidth = sizeBasis * 8;
 	RECT saveButtonRect = addAccountTab.codeEditArea;
 	saveButtonRect.left = (mainRect.left + mainRect.right - saveButtonWidth)/2;
 	saveButtonRect.right = saveButtonRect.left + saveButtonWidth;
-	saveButtonRect.top = addAccountTab.codeEditArea.bottom + sizeBasis*3;
+	saveButtonRect.top = mainRect.bottom - bottomButtonHeight - sizeBasis*4;// addAccountTab.codeEditArea.bottom + sizeBasis*3; for simple mod
 	saveButtonRect.bottom = saveButtonRect.top + sizeBasis*5/2;
-	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
+	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
 	SetWindowText(addAccountTab.saveButton, L"Save");
-
 	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
+
 }
 void DestroyAddTab()
 {
-	DestroyWindow(addAccountTab.nameEdit);
-	DestroyWindow(addAccountTab.codeEdit);
-	DestroyWindow(addAccountTab.saveButton);
+	HWND wnds[] = {
+		addAccountTab.nameEdit, addAccountTab.codeEdit, addAccountTab.saveButton, addAccountTab.advancedButton,
+		addAccountTab.tokenLength6, addAccountTab.tokenLength8, addAccountTab.tokenLength10,
+		addAccountTab.algorithmSha1, addAccountTab.algorithmSha256, addAccountTab.algorithmSha512,
+		addAccountTab.period15, addAccountTab.period30, addAccountTab.period60
+	};
+	for (size_t i=0; i<sizeof(wnds)/sizeof(HWND); i++) {
+		DestroyWindow(wnds[i]);
+	}
 }
 
 
@@ -914,13 +1087,26 @@ void PaintAddTab(HDC hdc)
 	labelRect.top = labelRect.bottom - textHeight;
 	DrawText(hdc, L"Secret Code", -1, &labelRect, DT_SINGLELINE);
 
-	RECT advancedRect;
+	labelRect.top = labelRect.bottom + sizeBasis*5;
+	labelRect.bottom = labelRect.top + textHeight;
+	DrawText(hdc, L"Token Length", -1, &labelRect, DT_SINGLELINE);
+
+	labelRect.top += sizeBasis*4;
+	labelRect.bottom += sizeBasis*4;
+	DrawText(hdc, L"Algorithm", -1, &labelRect, DT_SINGLELINE);
+	
+	labelRect.top += sizeBasis*4;
+	labelRect.bottom += sizeBasis*4;
+	DrawText(hdc, L"Token Rotates Every...", -1, &labelRect, DT_SINGLELINE);
+
+
+	/*RECT advancedRect;
 	advancedRect.bottom = clientRect.bottom - bottomButtonHeight - sizeBasis;
 	advancedRect.right = clientRect.right - sizeBasis;
 	advancedRect.left = 0;
 	advancedRect.top = advancedRect.bottom - textHeight;
 	SetTextColor(hdc, RGB(0,0,0));
-	DrawText(hdc, L"Advanced...", -1, &advancedRect, DT_SINGLELINE|DT_RIGHT);
+	DrawText(hdc, L"Advanced...", -1, &advancedRect, DT_SINGLELINE|DT_RIGHT);*/
 
 	SelectObject(hdc, oldFont);
 
