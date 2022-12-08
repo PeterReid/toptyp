@@ -452,20 +452,61 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+
+LRESULT CALLBACK AdvancedButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
+                               LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	PAINTSTRUCT ps;
+	HDC hdc;
+    switch (uMsg)
+    {
+	case WM_ERASEBKGND:
+		return TRUE;
+    case WM_PAINT:
+		hdc = BeginPaint(hWnd, &ps);
+		{
+			int radius = sizeBasis/3;
+
+			RECT r;
+			GetClientRect(hWnd, &r);
+			
+			HBRUSH b = (HBRUSH)::GetStockObject(WHITE_BRUSH);
+			FillRect(hdc, &r, b);
+
+			HFONT oldFont = (HFONT)SelectObject(hdc, font);
+			SetTextColor(hdc, RGB(0,0,0));
+			SetBkMode(hdc, TRANSPARENT);
+			DrawText(hdc, L"Advanced...", -1, &r, DT_SINGLELINE|DT_RIGHT|DT_VCENTER);
+			SelectObject(hdc, oldFont);
+
+			EndPaint(hWnd, &ps);
+		}
+        return TRUE;
+    } 
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
 #include <windowsx.h>
 
 LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                                LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
 {
 	PAINTSTRUCT ps;
-	HDC hdc;
+	HDC paintDC;
 	switch (uMsg)
 	{
 	case WM_ERASEBKGND:
 		return TRUE;
 	case WM_PAINT:
-		hdc = BeginPaint(hWnd, &ps);
+		paintDC = BeginPaint(hWnd, &ps);
 		{
+			RECT r;
+			GetClientRect(hWnd, &r);
+
+			HDC hdc = CreateCompatibleDC(paintDC);
+			HBITMAP offscreenBmp = CreateCompatibleBitmap(paintDC, r.right, r.bottom);
+			SelectObject(hdc, offscreenBmp);
+
+
 			bool checked = (Button_GetState(hWnd) & BST_CHECKED) != 0;
 
 			HWND next = GetWindow(hWnd, GW_HWNDNEXT);
@@ -492,9 +533,6 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			SelectObject(cornersDC, corners);
 			HBRUSH b = CreateSolidBrush(RGB(255,255,255));
 			HBRUSH selectedBrush = CreateSolidBrush(RGB(240,30,30));
-
-			RECT r;
-			GetClientRect(hWnd, &r);
 			
 			FillRect(hdc, &r, b);
 
@@ -541,6 +579,11 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			DeleteObject(b);
 			DeleteObject(foregroundBrush);
 			DeleteObject(selectedBrush);
+
+			BitBlt(paintDC, 0,0, r.right, r.bottom, hdc, 0,0, SRCCOPY);
+
+			DeleteDC(hdc);
+			DeleteObject(offscreenBmp);
 
 			EndPaint(hWnd, &ps);
 		}
@@ -633,13 +676,6 @@ struct TabParam {
 	int idc;
 	const WCHAR *text;
 };
-TabParam MakeTabParam(HWND *wnd, int idc, const WCHAR *text) {
-	TabParam p;
-	p.wnd = wnd;
-	p.idc = idc;
-	p.text = text;
-	return p;
-}
 
 void InitAddTab()
 {
@@ -668,19 +704,19 @@ void InitAddTab()
 
 	TabParam wnds[3][3] = {
 		{
-			MakeTabParam(&addAccountTab.tokenLength6, 0, L"6"),
-			MakeTabParam(&addAccountTab.tokenLength8, 0, L"8"),
-			MakeTabParam(&addAccountTab.tokenLength10, 0, L"10"),
+			{ &addAccountTab.tokenLength6, 0, L"6" },
+			{ &addAccountTab.tokenLength8, 0, L"8" },
+			{ &addAccountTab.tokenLength10, 0, L"10" },
 		},
 		{
-			MakeTabParam(&addAccountTab.algorithmSha1, 0, L"SHA-1"),
-			MakeTabParam(&addAccountTab.algorithmSha256, 0, L"SHA-256"),
-			MakeTabParam(&addAccountTab.algorithmSha512, 0, L"SHA-512"),
+			{ &addAccountTab.algorithmSha1, 0, L"SHA-1" },
+			{ &addAccountTab.algorithmSha256, 0, L"SHA-256" },
+			{ &addAccountTab.algorithmSha512, 0, L"SHA-512" },
 		},
 		{
-			MakeTabParam(&addAccountTab.period15, 0, L"15 seconds"),
-			MakeTabParam(&addAccountTab.period30, 0, L"30 seconds"),
-			MakeTabParam(&addAccountTab.period60, 0, L"60 seconds"),
+			{ &addAccountTab.period15, 0, L"15 seconds" },
+			{ &addAccountTab.period30, 0, L"30 seconds" },
+			{ &addAccountTab.period60, 0, L"60 seconds" },
 		}
 	};
 
@@ -699,8 +735,10 @@ void InitAddTab()
 			SendMessage(*tabParam.wnd, WM_SETFONT, (WPARAM)font, 0);
 			SetWindowSubclass(*tabParam.wnd, RadioButtonProc, 0, 0);
 		}
-		
 	}
+
+
+	
 
 	/*RECT advancedButtonRect = addAccountTab.codeEditArea;
 	
@@ -722,6 +760,14 @@ void InitAddTab()
 	SetWindowText(addAccountTab.saveButton, L"Save");
 	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
 
+	RECT advancedButtonRect;
+	advancedButtonRect.right = mainRect.right - sizeBasis;
+	advancedButtonRect.left = advancedButtonRect.right - sizeBasis*6;
+	advancedButtonRect.bottom = mainRect.bottom - bottomButtonHeight - sizeBasis;// addAccountTab.codeEditArea.bottom + sizeBasis*3; for simple mod
+	advancedButtonRect.top = saveButtonRect.bottom - textBoxHeight;
+	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
+	SetWindowText(addAccountTab.advancedButton, L"Advanced");
+	SetWindowSubclass(addAccountTab.advancedButton, AdvancedButtonProc, 0, 0);
 }
 void DestroyAddTab()
 {
@@ -905,10 +951,12 @@ static int ListItemHeight() {
 RECT codeHitArea = { 0 };
 POINT mousePoint = { 0 };
 
-void UpdateMouseCursor() {
+bool UpdateMouseCursor() {
 	if (activeTab == IDC_TAB_ACCOUNTS) {
 		SetCursor( selectedItem>=0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor );
+		return true;
 	}
+	return false;
 }
 
 void PaintEdits(HDC hdc, RECT *rects, int nRects)
@@ -1082,7 +1130,7 @@ void PaintAddTab(HDC hdc)
 	int componentBottom = clientRect.bottom - bottomButtonHeight - sizeBasis - sizeBasis*3;
 
 	RECT labelRect;
-	labelRect.left = addAccountTab.nameEditArea.left;
+	labelRect.left = addAccountTab.nameEditArea.left + sizeBasis/3;
 	labelRect.right = addAccountTab.nameEditArea.right;
 
 	WCHAR *labels[] = {
@@ -1097,15 +1145,6 @@ void PaintAddTab(HDC hdc)
 		labelRect.bottom = labelRect.top + textHeight;
 		DrawText(hdc, labels[i], -1, &labelRect, DT_SINGLELINE);
 	}
-
-
-	/*RECT advancedRect;
-	advancedRect.bottom = clientRect.bottom - bottomButtonHeight - sizeBasis;
-	advancedRect.right = clientRect.right - sizeBasis;
-	advancedRect.left = 0;
-	advancedRect.top = advancedRect.bottom - textHeight;
-	SetTextColor(hdc, RGB(0,0,0));
-	DrawText(hdc, L"Advanced...", -1, &advancedRect, DT_SINGLELINE|DT_RIGHT);*/
 
 	SelectObject(hdc, oldFont);
 
@@ -1251,8 +1290,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 	case WM_SETCURSOR:
-		UpdateMouseCursor();
-		break;
+		if (UpdateMouseCursor()) {
+			break;
+		} else {
+			return DefWindowProc(hWnd, message, wParam, lParam);
+		}
 	case WM_LBUTTONDOWN:
 	case WM_RBUTTONDOWN:
 	case WM_LBUTTONUP:
