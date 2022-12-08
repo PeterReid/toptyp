@@ -20,6 +20,7 @@
 #define ID_CODE_DRAWING_PROGRESS 114
 #define IDC_NAME			115
 #define IDC_CODE			116
+#define IDC_ADVANCED		117
 #define IDC_SAVE 117
 #define IDC_MYICON				2
 #ifndef IDC_STATIC

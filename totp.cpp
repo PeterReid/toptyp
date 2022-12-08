@@ -592,6 +592,47 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+LRESULT CALLBACK StaticLabelProc(HWND hWnd, UINT uMsg, WPARAM wParam,
+                               LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+	PAINTSTRUCT ps;
+	HDC paintDC;
+	switch (uMsg)
+	{
+	case WM_ERASEBKGND:
+		return TRUE;
+	case WM_PAINT:
+		paintDC = BeginPaint(hWnd, &ps);
+		{
+			RECT r;
+			GetClientRect(hWnd, &r);
+
+			HDC hdc = CreateCompatibleDC(paintDC);
+			HBITMAP offscreenBmp = CreateCompatibleBitmap(paintDC, r.right, r.bottom);
+			SelectObject(hdc, offscreenBmp);
+
+			FillRect(hdc, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
+			
+			HFONT oldFont = (HFONT)SelectObject(hdc, font);
+			SetTextColor(hdc, RGB(240,30,30));
+			SetBkMode(hdc, TRANSPARENT);
+			WCHAR labelText[256];
+			GetWindowText(hWnd, labelText, sizeof(labelText));
+			DrawText(hdc, labelText, -1, &r, DT_SINGLELINE|DT_LEFT|DT_NOPREFIX);
+			SelectObject(hdc, oldFont);
+
+			BitBlt(paintDC, 0,0, r.right, r.bottom, hdc, 0,0, SRCCOPY);
+
+			DeleteDC(hdc);
+			DeleteObject(offscreenBmp);
+
+			EndPaint(hWnd, &ps);
+		}
+        return TRUE;
+    }
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
 
 
 struct HintingEditData {
@@ -667,6 +708,7 @@ struct {
 	HWND tokenLength6, tokenLength8, tokenLength10;
 	HWND algorithmSha1, algorithmSha256, algorithmSha512;
 	HWND period15, period30, period60;
+	HWND labels[5];
 	HWND advancedButton;
 	bool advancedMode;
 } addAccountTab = { 0 };
@@ -676,6 +718,10 @@ struct TabParam {
 	int idc;
 	const WCHAR *text;
 };
+
+void ShowAdvancedAddOptions() {
+
+}
 
 void InitAddTab()
 {
@@ -765,9 +811,25 @@ void InitAddTab()
 	advancedButtonRect.left = advancedButtonRect.right - sizeBasis*6;
 	advancedButtonRect.bottom = mainRect.bottom - bottomButtonHeight - sizeBasis;// addAccountTab.codeEditArea.bottom + sizeBasis*3; for simple mod
 	advancedButtonRect.top = saveButtonRect.bottom - textBoxHeight;
-	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
+	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
 	SetWindowText(addAccountTab.advancedButton, L"Advanced");
 	SetWindowSubclass(addAccountTab.advancedButton, AdvancedButtonProc, 0, 0);
+
+	WCHAR *labels[] = {
+		L"Account Name",
+		L"Secret Code",
+		L"Token Length",
+		L"Algorithm",
+		L"Token Rotates Every..."
+	};
+	for (int i=0; i<5; i++) {
+		addAccountTab.labels[i] = CreateWindowW(L"STATIC", labels[i], WS_CHILD|WS_VISIBLE, 
+			addAccountTab.nameEditArea.left, 
+			componentTop + (componentBottom - componentTop) * i / 5,//addAccountTab.nameEditArea.top - sizeBasis*2/3 - textBoxHeight, 
+			addAccountTab.nameEditArea.right - addAccountTab.nameEditArea.left, 
+			textBoxHeight, mainWnd, (HMENU)NULL, hInst, 0);
+		SetWindowSubclass(addAccountTab.labels[i], StaticLabelProc, 0, 0);
+	}
 }
 void DestroyAddTab()
 {
@@ -775,7 +837,8 @@ void DestroyAddTab()
 		addAccountTab.nameEdit, addAccountTab.codeEdit, addAccountTab.saveButton, addAccountTab.advancedButton,
 		addAccountTab.tokenLength6, addAccountTab.tokenLength8, addAccountTab.tokenLength10,
 		addAccountTab.algorithmSha1, addAccountTab.algorithmSha256, addAccountTab.algorithmSha512,
-		addAccountTab.period15, addAccountTab.period30, addAccountTab.period60
+		addAccountTab.period15, addAccountTab.period30, addAccountTab.period60,
+		addAccountTab.labels[0], addAccountTab.labels[1], addAccountTab.labels[2], addAccountTab.labels[3], addAccountTab.labels[4]
 	};
 	for (size_t i=0; i<sizeof(wnds)/sizeof(HWND); i++) {
 		DestroyWindow(wnds[i]);
@@ -1143,7 +1206,7 @@ void PaintAddTab(HDC hdc)
 	for (int i=0; i<5; i++) {
 		labelRect.top = componentTop + (componentBottom - componentTop) * i / 5;
 		labelRect.bottom = labelRect.top + textHeight;
-		DrawText(hdc, labels[i], -1, &labelRect, DT_SINGLELINE);
+		//DrawText(hdc, labels[i], -1, &labelRect, DT_SINGLELINE);
 	}
 
 	SelectObject(hdc, oldFont);
@@ -1214,6 +1277,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case IDC_TAB_SCAN:
 			SetActiveTab(wmId);
 			break;
+		case IDC_ADVANCED:
+			ShowAdvancedAddOptions();
+			break;
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
@@ -1235,8 +1301,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 		}
 		break;
-	//case WM_ERASEBKGND:
-	//	break;
 	case WM_PAINT:
 		{
 			hdc = BeginPaint(hWnd, &ps);
