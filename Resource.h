@@ -21,7 +21,8 @@
 #define IDC_NAME			115
 #define IDC_CODE			116
 #define IDC_ADVANCED		117
-#define IDC_SAVE 117
+#define IDC_SAVE 118
+#define IDC_SCAN 119
 #define IDC_MYICON				2
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1

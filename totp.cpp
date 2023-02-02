@@ -407,6 +407,7 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_ADD);
 			int radius = sizeBasis/3;
 
+
 			HBITMAP corners = CreateRoundedCorner(hdc, RGB(240,30,30), RGB(240,30,30), RGB(255,255,255), radius);
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
@@ -425,10 +426,12 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			HFONT oldFont = (HFONT)SelectObject(hdc, font);
 			SetTextColor(hdc, RGB(255,255,255));
 			SetBkMode(hdc, TRANSPARENT);
-			DrawText(hdc, L"Save", -1, &r, DT_SINGLELINE|DT_CENTER|DT_VCENTER);
+			WCHAR textBuf[256];
+			GetWindowText(hWnd, textBuf, sizeof(textBuf)/sizeof(WCHAR));
+			DrawText(hdc, textBuf, -1, &r, DT_SINGLELINE|DT_CENTER|DT_VCENTER);
 			SelectObject(hdc, oldFont);
 
-			if (GetFocus() == hWnd) {
+			/*if (GetFocus() == hWnd) {
 				RECT textRect = r;
 				DrawText(hdc, L"Save", -1, &textRect, DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_CALCRECT);
 
@@ -440,7 +443,7 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 				underlineRect.top = textRect.bottom + 1;
 				underlineRect.bottom = underlineRect.top + 1;
 				FillRect(hdc, &underlineRect, whiteBrush);
-			}
+			}*/
 
 			DeleteDC(cornersDC);
 			DeleteObject(corners);
@@ -618,7 +621,7 @@ LRESULT CALLBACK StaticLabelProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			SetBkMode(hdc, TRANSPARENT);
 			WCHAR labelText[256];
 			GetWindowText(hWnd, labelText, sizeof(labelText));
-			DrawText(hdc, labelText, -1, &r, DT_SINGLELINE|DT_LEFT|DT_NOPREFIX);
+			DrawText(hdc, labelText, -1, &r, DT_WORDBREAK|DT_LEFT|DT_NOPREFIX);
 			SelectObject(hdc, oldFont);
 
 			BitBlt(paintDC, 0,0, r.right, r.bottom, hdc, 0,0, SRCCOPY);
@@ -719,10 +722,6 @@ struct TabParam {
 	const WCHAR *text;
 };
 
-void ShowAdvancedAddOptions() {
-
-}
-
 void InitAddTab()
 {
 	RECT mainRect;
@@ -734,6 +733,7 @@ void InitAddTab()
 	int componentBottom = mainRect.bottom - bottomButtonHeight - margin - sizeBasis*3;
 	int componentPlacementFromTop = sizeBasis*3/2;
 	int textBoxMargin = sizeBasis*2/3;
+
 	addAccountTab.nameEditArea.left = margin + textBoxMargin;
 	addAccountTab.nameEditArea.top = componentTop + (componentBottom - componentTop) * 0 / 5 + componentPlacementFromTop + textBoxMargin;
 	addAccountTab.nameEditArea.right = mainRect.right - margin - textBoxMargin;
@@ -747,6 +747,68 @@ void InitAddTab()
 	addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, &addAccountTabCodeEditData);
 
 	addAccountTab.advancedMode = false;
+	
+	
+	int saveButtonWidth = sizeBasis * 8;
+	RECT saveButtonRect = addAccountTab.codeEditArea;
+	saveButtonRect.left = (mainRect.left + mainRect.right - saveButtonWidth)/2;
+	saveButtonRect.right = saveButtonRect.left + saveButtonWidth;
+	saveButtonRect.top = mainRect.bottom - bottomButtonHeight - sizeBasis*4;// addAccountTab.codeEditArea.bottom + sizeBasis*3; for simple mod
+	saveButtonRect.bottom = saveButtonRect.top + sizeBasis*5/2;
+	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
+	SetWindowText(addAccountTab.saveButton, L"Save");
+	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
+
+	RECT advancedButtonRect;
+	advancedButtonRect.right = mainRect.right/2 + sizeBasis*7;
+	advancedButtonRect.left = mainRect.right/2 - sizeBasis*7;
+	advancedButtonRect.top = componentTop + (componentBottom - componentTop) * 2 / 5 + componentPlacementFromTop;
+	advancedButtonRect.bottom = advancedButtonRect.top + sizeBasis*5/2;
+
+	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
+	SetWindowText(addAccountTab.advancedButton, L"Show Advanced Options");
+	SetWindowSubclass(addAccountTab.advancedButton, SaveButtonProc, 0, 0);
+
+	WCHAR *labels[] = {
+		L"Account Name",
+		L"Secret Code",
+	};
+	for (int i=0; i<2; i++) {
+		addAccountTab.labels[i] = CreateWindowW(L"STATIC", labels[i], WS_CHILD|WS_VISIBLE, 
+			addAccountTab.nameEditArea.left, 
+			componentTop + (componentBottom - componentTop) * i / 5,//addAccountTab.nameEditArea.top - sizeBasis*2/3 - textBoxHeight, 
+			addAccountTab.nameEditArea.right - addAccountTab.nameEditArea.left, 
+			textBoxHeight, mainWnd, (HMENU)NULL, hInst, 0);
+		SetWindowSubclass(addAccountTab.labels[i], StaticLabelProc, 0, 0);
+	}
+}
+
+void ShowAdvancedAddOptions() {
+	DestroyWindow(addAccountTab.advancedButton);
+	addAccountTab.advancedButton = NULL;
+	RECT mainRect;
+	GetClientRect(mainWnd, &mainRect);
+
+	int margin = sizeBasis;
+
+	int componentTop = mainRect.top + margin;
+	int componentBottom = mainRect.bottom - bottomButtonHeight - margin - sizeBasis*3;
+	int componentPlacementFromTop = sizeBasis*3/2;
+	int textBoxMargin = sizeBasis*2/3;
+	addAccountTab.nameEditArea.left = margin + textBoxMargin;
+	addAccountTab.nameEditArea.top = componentTop + (componentBottom - componentTop) * 0 / 5 + componentPlacementFromTop + textBoxMargin;
+	addAccountTab.nameEditArea.right = mainRect.right - margin - textBoxMargin;
+	addAccountTab.nameEditArea.bottom = addAccountTab.nameEditArea.top + textBoxHeight;
+	MoveWindow(addAccountTab.nameEdit, addAccountTab.nameEditArea.left, addAccountTab.nameEditArea.top, addAccountTab.nameEditArea.right - addAccountTab.codeEditArea.left, addAccountTab.nameEditArea.bottom - addAccountTab.nameEditArea.top, FALSE);
+
+
+	addAccountTab.codeEditArea = addAccountTab.nameEditArea;
+	addAccountTab.codeEditArea.top = componentTop + (componentBottom - componentTop) * 1 / 5 + componentPlacementFromTop + textBoxMargin;
+	addAccountTab.codeEditArea.bottom = addAccountTab.codeEditArea.top + textBoxHeight;
+	MoveWindow(addAccountTab.codeEdit, addAccountTab.codeEditArea.left, addAccountTab.codeEditArea.top, addAccountTab.codeEditArea.right - addAccountTab.codeEditArea.left, addAccountTab.codeEditArea.bottom - addAccountTab.codeEditArea.top, FALSE);
+	//addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, &addAccountTabCodeEditData);
+
+	addAccountTab.advancedMode = true;
 
 	TabParam wnds[3][3] = {
 		{
@@ -776,44 +838,10 @@ void InitAddTab()
 			radioArea.right = margin + (mainRect.right - margin - margin) * (i+1) / 3;
 
 			TabParam tabParam = wnds[buttonSet][i];
-			*tabParam.wnd = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
-			SetWindowText(*tabParam.wnd, tabParam.text);
-			SendMessage(*tabParam.wnd, WM_SETFONT, (WPARAM)font, 0);
+			*tabParam.wnd = CreateWindow(_T("BUTTON"), tabParam.text, WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
 			SetWindowSubclass(*tabParam.wnd, RadioButtonProc, 0, 0);
 		}
 	}
-
-
-	
-
-	/*RECT advancedButtonRect = addAccountTab.codeEditArea;
-	
-	advancedButtonRect.bottom = mainRect.bottom - bottomButtonHeight - sizeBasis;
-	advancedButtonRect.right = mainRect.right - sizeBasis;
-	advancedButtonRect.left = 0;
-	advancedButtonRect.top = mainRect.bottom - textBoxHeight;
-	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
-	SetWindowText(addAccountTab.advancedButton, L"Advanced...");*/
-
-	
-	int saveButtonWidth = sizeBasis * 8;
-	RECT saveButtonRect = addAccountTab.codeEditArea;
-	saveButtonRect.left = (mainRect.left + mainRect.right - saveButtonWidth)/2;
-	saveButtonRect.right = saveButtonRect.left + saveButtonWidth;
-	saveButtonRect.top = mainRect.bottom - bottomButtonHeight - sizeBasis*4;// addAccountTab.codeEditArea.bottom + sizeBasis*3; for simple mod
-	saveButtonRect.bottom = saveButtonRect.top + sizeBasis*5/2;
-	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
-	SetWindowText(addAccountTab.saveButton, L"Save");
-	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
-
-	RECT advancedButtonRect;
-	advancedButtonRect.right = mainRect.right - sizeBasis;
-	advancedButtonRect.left = advancedButtonRect.right - sizeBasis*6;
-	advancedButtonRect.bottom = mainRect.bottom - bottomButtonHeight - sizeBasis;// addAccountTab.codeEditArea.bottom + sizeBasis*3; for simple mod
-	advancedButtonRect.top = saveButtonRect.bottom - textBoxHeight;
-	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
-	SetWindowText(addAccountTab.advancedButton, L"Advanced");
-	SetWindowSubclass(addAccountTab.advancedButton, AdvancedButtonProc, 0, 0);
 
 	WCHAR *labels[] = {
 		L"Account Name",
@@ -823,6 +851,7 @@ void InitAddTab()
 		L"Token Rotates Every..."
 	};
 	for (int i=0; i<5; i++) {
+		if  (addAccountTab.labels[i]) continue;
 		addAccountTab.labels[i] = CreateWindowW(L"STATIC", labels[i], WS_CHILD|WS_VISIBLE, 
 			addAccountTab.nameEditArea.left, 
 			componentTop + (componentBottom - componentTop) * i / 5,//addAccountTab.nameEditArea.top - sizeBasis*2/3 - textBoxHeight, 
@@ -830,6 +859,12 @@ void InitAddTab()
 			textBoxHeight, mainWnd, (HMENU)NULL, hInst, 0);
 		SetWindowSubclass(addAccountTab.labels[i], StaticLabelProc, 0, 0);
 	}
+
+	SetWindowPos(addAccountTab.saveButton, addAccountTab.period60, 0,0,0,0, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
+
+	Button_SetCheck(addAccountTab.algorithmSha1, BST_CHECKED);
+	Button_SetCheck(addAccountTab.tokenLength6, BST_CHECKED);
+	Button_SetCheck(addAccountTab.period30, BST_CHECKED);
 }
 void DestroyAddTab()
 {
@@ -843,9 +878,47 @@ void DestroyAddTab()
 	for (size_t i=0; i<sizeof(wnds)/sizeof(HWND); i++) {
 		DestroyWindow(wnds[i]);
 	}
+
+	ZeroMemory(&addAccountTab, sizeof(addAccountTab));
 }
 
 
+struct {
+	HWND instructions;
+	HWND scan;
+} scanTab;
+
+void InitScanTab()
+{
+	RECT mainRect;
+	GetClientRect(mainWnd, &mainRect);
+
+	int margin = sizeBasis;
+
+	scanTab.instructions = CreateWindowW(L"STATIC", L"Please make sure the QR code is visible on your screen and then click...", WS_CHILD|WS_VISIBLE, 
+		margin, 
+		margin, 
+		mainRect.right - margin*2, 
+		textBoxHeight*2, mainWnd, (HMENU)NULL, hInst, 0);
+	SetWindowSubclass(scanTab.instructions, StaticLabelProc, 0, 0);
+
+	int scanButtonTop = margin + textBoxHeight*2 + margin;
+	scanTab.scan = CreateWindow(_T("BUTTON"), L"Scan", WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, margin, scanButtonTop, mainRect.right-margin*2, sizeBasis*5/2, mainWnd, (HMENU)IDC_SCAN, NULL, NULL);
+	SetWindowSubclass(scanTab.scan, SaveButtonProc, 0, 0);
+
+}
+
+void DestroyScanTab()
+{
+	HWND wnds[] = {
+		scanTab.instructions, scanTab.scan
+	};
+	for (size_t i=0; i<sizeof(wnds)/sizeof(HWND); i++) {
+		DestroyWindow(wnds[i]);
+	}
+
+	ZeroMemory(&scanTab, sizeof(scanTab));
+}
 
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
@@ -976,6 +1049,7 @@ void SetActiveTab(int idc)
 	switch (activeTab) {
 	case IDC_TAB_ACCOUNTS: DestroyAccountsTab(); break;
 	case IDC_TAB_ADD: DestroyAddTab(); break;
+	case IDC_TAB_SCAN: DestroyScanTab(); break;
 	}
 
 	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
@@ -986,6 +1060,7 @@ void SetActiveTab(int idc)
 	switch (activeTab) {
 	case IDC_TAB_ACCOUNTS: InitAccountsTab(); break;
 	case IDC_TAB_ADD: InitAddTab(); break;
+	case IDC_TAB_SCAN: InitScanTab(); break;
 	}
 
 	InvalidateRect(mainWnd, NULL, TRUE);
