@@ -1172,7 +1172,7 @@ void PaintAccounts(HDC hdc)
 
 	SelectObject(itemDC, font);
 
-	int textHeight = GetTextHeight(hdc);
+	int textHeight = GetTextHeight(itemDC);
 
 	// Draw the actual list of accounts
 	int pos = GetScrollPos(scroll, SB_CTL);
