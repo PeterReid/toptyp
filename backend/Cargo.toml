@@ -21,3 +21,10 @@ lto = true # Removes most of std
 #opt-level = "z"  # Optimize for size.
 #codegen-units = 1
 panic = "abort"
+
+[profile.dev]
+strip = true  # Automatically strip symbols from the binary.
+lto = true # Removes most of std
+#opt-level = "z"  # Optimize for size.
+#codegen-units = 1
+panic = "abort"

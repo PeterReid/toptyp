@@ -24,6 +24,7 @@ enum Algorithm {
     Sha512,
 }
 
+#[derive(Debug)]
 struct Account {
     name: String,
     secret: Vec<u8>,
@@ -137,7 +138,7 @@ fn write_to_buffer(dest: &mut [u8], value: &str) -> Result<(), Box<dyn Error>> {
         Err(format!("Not enough space to write into a buffer"))?;
     }
     
-    dest.copy_from_slice(value_bytes);
+    dest[..value_bytes.len()].copy_from_slice(value_bytes);
     dest[value_bytes.len()] = 0;
     Ok( () )
 }
@@ -148,6 +149,7 @@ fn empty_string_into_buffer(dest: &mut [u8]) {
     }
 }
 
+#[no_mangle]
 pub extern "C" fn load_accounts() -> u32 {
     result_to_error_code(load_accounts_inner())
 }
@@ -155,7 +157,7 @@ pub extern "C" fn load_accounts() -> u32 {
 fn load_accounts_inner() -> Result<(), Box<dyn Error>> {
     let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
     dir.push("totp.txt");
-    
+    println!("{:?}", dir);
     let mut data = Vec::new();
     File::open(&dir)?.read_to_end(&mut data)?;
     
@@ -174,6 +176,12 @@ fn load_accounts_inner() -> Result<(), Box<dyn Error>> {
     }
     
     Ok( () )
+}
+
+
+#[no_mangle]
+pub extern "C" fn accounts_len() -> u32 {
+    ACCOUNTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
 }
 
 fn result_to_error_code<E>(r: Result<(), E>) -> u32 {
@@ -249,3 +257,20 @@ fn otpauth_no_issuer_example() {
     assert_eq!(account.algorithm, Algorithm::Sha1);
     assert_eq!(account.name, "ACME Co");
 }
+
+#[test]
+fn get_account_name_test() {
+    load_accounts_inner().unwrap();
+    let mut buf = [0u8; 100];
+    get_account_name(0, buf.as_mut_ptr(), 100);
+    println!("{:?}", buf);
+    panic!();
+}
+
+/*
+#[test]
+fn load_account_test() {
+    load_accounts();
+    println!("{:?}", &ACCOUNTS.lock().unwrap());
+    panic!();
+}*/

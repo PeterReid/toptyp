@@ -4,7 +4,7 @@
 #include "stdafx.h"
 #include "totp.h"
 #include <commctrl.h>
-
+#include <stdint.h>
 #define MAX_LOADSTRING 100
 
 // Global Variables:
@@ -29,7 +29,14 @@ HFONT font = NULL;
 int activeTab = 0;
 int trackingMouseLeave = false;
 
-int codeDrawingProgressTimer = 0;
+UINT_PTR codeDrawingProgressTimer = 0;
+
+extern "C" {
+	uint32_t load_accounts();
+	uint32_t accounts_len();
+	uint32_t get_account_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
+	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len);
+}
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
 
@@ -62,6 +69,8 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 	LoadString(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
 	LoadString(hInstance, IDC_TOTP, szWindowClass, MAX_LOADSTRING);
 	MyRegisterClass(hInstance);
+
+	uint32_t ret = load_accounts();
 
 	// Perform application initialization:
 	if (!InitInstance (hInstance, nCmdShow))
@@ -662,7 +671,7 @@ HintingEditData addAccountTabCodeEditData = { TRUE, FALSE, L"e.g. L9WPBRYZLHALSN
 HWND CreateHintingEdit(RECT r, int idc, HintingEditData *hintData)
 {
 	HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, r.left,r.top, r.right - r.left,r.bottom - r.top, mainWnd, (HMENU)idc, NULL, NULL);
-	SetWindowLongPtr(edit, GWLP_USERDATA, (LONG)hintData);
+	SetWindowLongPtr(edit, GWLP_USERDATA, (LONG_PTR)hintData);
 	SetWindowText(edit, hintData->hintText);
 	SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
 	return edit;
@@ -1167,7 +1176,8 @@ void PaintAccounts(HDC hdc)
 
 	// Draw the actual list of accounts
 	int pos = GetScrollPos(scroll, SB_CTL);
-	for (int i=0, listY = listTop - pos; i<20; i++, listY += listItemHeight) {
+	int account_count = accounts_len();
+	for (int i=0, listY = listTop - pos; i<account_count; i++, listY += listItemHeight) {
 		if (listY + listItemHeight < listTop) continue;
 		if (listY > listBottom) break;
 		RECT divider;
@@ -1193,7 +1203,12 @@ void PaintAccounts(HDC hdc)
 			codeRect.top = (listItemHeight - textHeight)/2;
 			codeRect.right -= sizeBasis;
 			WCHAR ch[50];
-			wsprintf(ch, L"%03u %03u", (129 * (i+1) * whichCode) % 1000, (456 * (i+1) * whichCode)%1000);
+			uint8_t codeUtf8[50];
+			get_code(i, codeUtf8, sizeof(codeUtf8));
+			MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (char *)codeUtf8, sizeof(codeUtf8), ch, sizeof(ch)/sizeof(*ch));
+
+
+			//wsprintf(ch, L"%03u %03u", (129 * (i+1) * whichCode) % 1000, (456 * (i+1) * whichCode)%1000);
 
 			RECT codeMeasureRect = codeRect;
 			DrawText(itemDC, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
@@ -1228,10 +1243,12 @@ void PaintAccounts(HDC hdc)
 		RECT textRect = divider;
 		textRect.left = sizeBasis;
 		textRect.top = (listItemHeight - textHeight)/2;
-		WCHAR ch[50];
-		wsprintf(ch, L"Option %d", i+1);
-		DrawText(itemDC, ch, -1, &textRect, DT_SINGLELINE);
 
+		uint8_t utf8AccountName[100] = "";
+		WCHAR ch[100] = L"";
+		get_account_name(i, utf8AccountName, sizeof(utf8AccountName));
+		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (char *)utf8AccountName, 100, ch, 100);
+		DrawText(itemDC, ch, -1, &textRect, DT_SINGLELINE);
 
 		FillRect(itemDC, &divider, dividerBrush);
 
