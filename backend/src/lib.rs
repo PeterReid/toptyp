@@ -217,18 +217,19 @@ fn get_account_name_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<()
 }
 
 #[no_mangle]
-pub extern "C" fn get_code(index: u32, dest: *mut u8, dest_len: u32) -> u32 {
-    result_to_error_code(get_code_inner(index, dest, dest_len))
+pub extern "C" fn get_code(index: u32, dest: *mut u8, dest_len: u32, millis_per_code: *mut u32, millis_into_code: *mut u32) -> u32 {
+    result_to_error_code(get_code_inner(index, dest, dest_len, millis_per_code, millis_into_code))
 }
 
-fn get_code_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<(), Box<dyn Error>> {
+fn get_code_inner(index: u32, dest: *mut u8, dest_len: u32, millis_per_code: *mut u32, millis_into_code: *mut u32) -> Result<(), Box<dyn Error>> {
     let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into()?) };
     empty_string_into_buffer(dest);
     
     let mut accounts = ACCOUNTS.lock()?;
     let account = get_account(&mut accounts, index)?;
     
-    let seconds: u64 = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let seconds: u64 = since_epoch.as_secs();
     let code = match account.algorithm {
         Algorithm::Sha1 => totp_custom::<totp_lite::Sha1>(account.period, account.digits, &account.secret, seconds),
         Algorithm::Sha256 => totp_custom::<totp_lite::Sha256>(account.period, account.digits, &account.secret, seconds),
@@ -236,6 +237,11 @@ fn get_code_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<(), Box<dy
     };
     
     write_to_buffer(dest, code.as_str())?;
+    
+    unsafe {
+        *millis_per_code = (account.period * 1000) as u32;
+        *millis_into_code = ((seconds % account.period) as u32) * 1000 + since_epoch.subsec_millis();
+    }
     
     Ok( () )
 }

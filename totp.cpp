@@ -35,7 +35,7 @@ extern "C" {
 	uint32_t load_accounts();
 	uint32_t accounts_len();
 	uint32_t get_account_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
-	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len);
+	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 }
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
@@ -1192,24 +1192,27 @@ void PaintAccounts(HDC hdc)
 		FillRect(itemDC, &itemArea, backgroundBrush);
 
 		if (i == selectedItem) {
-			FILETIME now;
-			GetSystemTimeAsFileTime(&now);
-			int millisPerCode = 30000;
-			LONGLONG millisecondsSinceEpoch = ((LONGLONG)now.dwLowDateTime + ((LONGLONG)(now.dwHighDateTime) << 32LL))/10000 - 11644473600000LL ;
-			int milliSecondsIntoCode = millisecondsSinceEpoch % millisPerCode;
-			int whichCode = (int)((millisecondsSinceEpoch / millisPerCode) % 20) + 1;
+			uint32_t millisPerCode = 1, millisIntoCode = 0;
+
+			WCHAR ch[50];
+			char codeUtf8[50];
+			if (get_code(i, (uint8_t *)codeUtf8, sizeof(codeUtf8), &millisPerCode, &millisIntoCode) != 0) {
+				continue;
+			}
+			
+			int codeLength = strlen(codeUtf8);
+			if (codeLength == 6) {
+				codeUtf8[7] = 0;
+				codeUtf8[6] = codeUtf8[5];
+				codeUtf8[5] = codeUtf8[4];
+				codeUtf8[4] = codeUtf8[3];
+				codeUtf8[3] = ' ';
+			}
+			MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (char *)codeUtf8, sizeof(codeUtf8), ch, sizeof(ch)/sizeof(*ch));
 
 			RECT codeRect = divider;
 			codeRect.top = (listItemHeight - textHeight)/2;
 			codeRect.right -= sizeBasis;
-			WCHAR ch[50];
-			uint8_t codeUtf8[50];
-			get_code(i, codeUtf8, sizeof(codeUtf8));
-			MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (char *)codeUtf8, sizeof(codeUtf8), ch, sizeof(ch)/sizeof(*ch));
-
-
-			//wsprintf(ch, L"%03u %03u", (129 * (i+1) * whichCode) % 1000, (456 * (i+1) * whichCode)%1000);
-
 			RECT codeMeasureRect = codeRect;
 			DrawText(itemDC, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
 			int codeWidth = codeMeasureRect.right - codeMeasureRect.left;
@@ -1222,7 +1225,7 @@ void PaintAccounts(HDC hdc)
 			codeHitArea.bottom = codeMeasureRect.bottom + listY;
 			UpdateMouseCursor();
 
-			int pixelProgress = (int)(codeWidth * (double)milliSecondsIntoCode / millisPerCode);
+			int pixelProgress = (int)(codeWidth * (double)millisIntoCode / millisPerCode);
 
 			HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
 			SelectClipRgn(itemDC, redCode);
@@ -1237,17 +1240,17 @@ void PaintAccounts(HDC hdc)
 				KillTimer(mainWnd, codeDrawingProgressTimer);
 			}
 			int nextPixelMillis = (pixelProgress + 1) * millisPerCode / codeWidth;
-			codeDrawingProgressTimer = SetTimer(mainWnd, ID_CODE_DRAWING_PROGRESS, nextPixelMillis - milliSecondsIntoCode + 10, NULL); // 10ms is an unnoticable slop, in case the WM_TIMER timing is not very accurate
+			codeDrawingProgressTimer = SetTimer(mainWnd, ID_CODE_DRAWING_PROGRESS, nextPixelMillis - millisIntoCode + 10, NULL); // 10ms is an unnoticable slop, in case the WM_TIMER timing is not very accurate
 		}
 
 		RECT textRect = divider;
 		textRect.left = sizeBasis;
 		textRect.top = (listItemHeight - textHeight)/2;
 
-		uint8_t utf8AccountName[100] = "";
+		char utf8AccountName[100] = "";
 		WCHAR ch[100] = L"";
-		get_account_name(i, utf8AccountName, sizeof(utf8AccountName));
-		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (char *)utf8AccountName, 100, ch, 100);
+		get_account_name(i, (uint8_t *)utf8AccountName, sizeof(utf8AccountName));
+		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, utf8AccountName, 100, ch, 100);
 		DrawText(itemDC, ch, -1, &textRect, DT_SINGLELINE);
 
 		FillRect(itemDC, &divider, dividerBrush);
