@@ -1200,7 +1200,7 @@ void PaintAccounts(HDC hdc)
 				continue;
 			}
 			
-			int codeLength = strlen(codeUtf8);
+			size_t codeLength = strlen(codeUtf8);
 			if (codeLength == 6) {
 				codeUtf8[7] = 0;
 				codeUtf8[6] = codeUtf8[5];
@@ -1306,6 +1306,23 @@ void PaintAddTab(HDC hdc)
 
 	SelectObject(hdc, oldFont);
 
+}
+
+void CopyAsciiToClipboard(const char *ascii)
+{
+	if (!OpenClipboard(mainWnd)) return;
+	EmptyClipboard();
+
+	size_t len = strlen(ascii);
+	HGLOBAL textHandle = GlobalAlloc(GMEM_MOVEABLE, len + 1); 
+	if (textHandle) {
+		uint8_t *dest = (uint8_t *)GlobalLock(textHandle); 
+        memcpy(dest, ascii, len+1); 
+        GlobalUnlock(textHandle); 
+
+		SetClipboardData(CF_TEXT, textHandle); // transfers ownership of textHandle to Windows
+	}
+	CloseClipboard();
 }
 
 //
@@ -1455,6 +1472,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
 	case WM_LBUTTONDOWN:
+		{
+			if (activeTab == IDC_TAB_ACCOUNTS) {
+				if( selectedItem>=0 && PtInRect(&codeHitArea, mousePoint) ) {
+					char codeUtf8[50] = { 0 };
+					uint32_t millisPerCode, millisIntoCode;
+					get_code(selectedItem, (uint8_t *)codeUtf8, sizeof(codeUtf8), &millisPerCode, &millisIntoCode);
+
+					CopyAsciiToClipboard(codeUtf8);
+				}
+				return true;
+			}
+		}
 	case WM_RBUTTONDOWN:
 	case WM_LBUTTONUP:
 	case WM_RBUTTONUP:
