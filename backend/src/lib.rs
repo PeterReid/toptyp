@@ -11,7 +11,10 @@ use std::error::Error;
 
 use std::time::UNIX_EPOCH;
 use url::Url;
+use std::ffi::CStr;
 use totp_lite::totp_custom;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 static ACCOUNTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
     Mutex::new(vec![])
@@ -45,6 +48,8 @@ enum TotpError {
     MissingSecret,
     MalformedDigits,
     MalformedPeriod,
+    MalformedName,
+    FileWriteError,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -129,6 +134,19 @@ impl Account {
            digits: digits,
         })
     }
+    
+    fn to_url(&self) -> String {
+        format!("otpauth://totp/?secret={}&issuer={}&algorithm={}&digits={}&period={}", 
+            base32::encode(base32::Alphabet::RFC4648{padding: false}, &self.secret), 
+            percent_encoding::percent_encode(self.name.as_bytes(), percent_encoding::NON_ALPHANUMERIC), 
+            match self.algorithm {
+                Algorithm::Sha1 => "SHA1",
+                Algorithm::Sha256 => "SHA256",
+                Algorithm::Sha512 => "SHA512",
+            },
+            self.digits,
+            self.period)
+    }
 }
 
 fn write_to_buffer(dest: &mut [u8], value: &str) -> Result<(), Box<dyn Error>> {
@@ -154,9 +172,14 @@ pub extern "C" fn load_accounts() -> u32 {
     result_to_error_code(load_accounts_inner())
 }
 
-fn load_accounts_inner() -> Result<(), Box<dyn Error>> {
+fn get_save_file() -> Result<PathBuf, Box<dyn Error>> {
     let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
     dir.push("totp.txt");
+    Ok(dir)
+}
+
+fn load_accounts_inner() -> Result<(), Box<dyn Error>> {
+    let dir = get_save_file()?;
     println!("{:?}", dir);
     let mut data = Vec::new();
     File::open(&dir)?.read_to_end(&mut data)?;
@@ -245,6 +268,49 @@ fn get_code_inner(index: u32, dest: *mut u8, dest_len: u32, millis_per_code: *mu
     
     Ok( () )
 }
+
+#[no_mangle]
+pub extern "C" fn add_account(name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> u32 {
+    result_to_error_code(add_account_inner(name, code, algorithm, digits, period))
+}
+
+fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), TotpError> {
+    let name_str = unsafe { CStr::from_ptr(name as *const i8) };
+    let code_str = unsafe { CStr::from_ptr(code as *const i8) };
+    
+    let account = Account {
+        name: name_str.to_str().map_err(|_| TotpError::MalformedName)?.to_string(),
+        secret: base32::decode(base32::Alphabet::RFC4648{padding: false}, code_str.to_str().map_err(|_| TotpError::MalformedSecret)?).ok_or(TotpError::MalformedSecret)?,
+        algorithm: match algorithm {
+            1 => Algorithm::Sha1,
+            256 => Algorithm::Sha256,
+            512 => Algorithm::Sha512,
+            _ => {
+                return Err(TotpError::UnsupportedAlgorithm)
+            }
+        },
+        period: match period {
+            15 | 30 | 60 => { period as u64 },
+            _ => {
+                return Err(TotpError::UnsupportedPeriod)
+            }
+        },
+        digits : match digits {
+            6 | 8 | 10 => { digits },
+            _ => {
+                return Err(TotpError::UnsupportedDigitCount)
+            }
+        }
+    };
+    
+    let mut file = OpenOptions::new().append(true).open(get_save_file().map_err(|_| TotpError::FileWriteError)?).map_err(|_| TotpError::FileWriteError)?;
+    file.write(format!("\r\n{}", account.to_url()).as_bytes()).map_err(|_| TotpError::FileWriteError)?;
+
+    let _ = load_accounts_inner();
+    
+    Ok( () )
+}
+
 
 #[test]
 fn otpauth_example() {

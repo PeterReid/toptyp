@@ -36,6 +36,7 @@ extern "C" {
 	uint32_t accounts_len();
 	uint32_t get_account_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
+	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
 }
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
@@ -699,8 +700,8 @@ void InitAccountsTab()
 	SCROLLINFO info = { 0 };
 	info.cbSize = sizeof(info);
 	info.fMask = SIF_RANGE | SIF_PAGE;
-	info.nMax = 20 * sizeBasis*4;
-	info.nPage = sizeBasis*4*10;
+	info.nMax = accounts_len() * sizeBasis*4;
+	info.nPage = scrollRect.bottom - scrollRect.top;
 	SetScrollInfo(scroll, SB_CTL, &info, FALSE);
 }
 
@@ -890,7 +891,31 @@ void DestroyAddTab()
 
 	ZeroMemory(&addAccountTab, sizeof(addAccountTab));
 }
+void SaveAccount()
+{
+	WCHAR nameBuffer[255];
+	WCHAR codeBuffer[255];
 
+	GetWindowTextW(addAccountTab.nameEdit, nameBuffer, sizeof(nameBuffer));
+	GetWindowTextW(addAccountTab.codeEdit, codeBuffer, sizeof(codeBuffer));
+	int tokenLength = addAccountTab.tokenLength10 && (Button_GetState(addAccountTab.tokenLength10) & BST_CHECKED) ? 10
+		: addAccountTab.tokenLength8 && (Button_GetState(addAccountTab.tokenLength8) & BST_CHECKED) ? 8
+		: 6;
+	int period = addAccountTab.period60 && (Button_GetState(addAccountTab.period60) & BST_CHECKED) ? 60
+		: addAccountTab.period15 && (Button_GetState(addAccountTab.period15) & BST_CHECKED) ? 15
+		: 30;
+	int algorithm = addAccountTab.algorithmSha512 && (Button_GetState(addAccountTab.algorithmSha512) & BST_CHECKED) ? 512
+		: addAccountTab.algorithmSha256 && (Button_GetState(addAccountTab.algorithmSha256) & BST_CHECKED) ? 256
+		: 1;
+
+	uint8_t nameUtf8[512];
+	uint8_t codeUtf8[512];
+	WideCharToMultiByte(CP_UTF8, 0, nameBuffer, -1, (char *)nameUtf8, sizeof(nameUtf8), 0, 0);
+	WideCharToMultiByte(CP_UTF8, 0, codeBuffer, -1, (char *)codeUtf8, sizeof(codeUtf8), 0, 0);
+	add_account(nameUtf8, codeUtf8, algorithm, tokenLength, period);
+
+	SetActiveTab(IDC_TAB_ACCOUNTS);
+}
 
 struct {
 	HWND instructions;
@@ -1391,6 +1416,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDC_ADVANCED:
 			ShowAdvancedAddOptions();
+			break;
+		case IDC_SAVE:
+			SaveAccount();
 			break;
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
