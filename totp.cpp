@@ -31,12 +31,16 @@ int trackingMouseLeave = false;
 
 UINT_PTR codeDrawingProgressTimer = 0;
 
+int copiedFromItem = -1;
+char copiedCodeUtf8[50] = { 0 };
+
 extern "C" {
 	uint32_t load_accounts();
 	uint32_t accounts_len();
 	uint32_t get_account_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
+	uint32_t delete_account(uint32_t index);
 }
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
@@ -1224,10 +1228,30 @@ void PaintAccounts(HDC hdc)
 			if (get_code(i, (uint8_t *)codeUtf8, sizeof(codeUtf8), &millisPerCode, &millisIntoCode) != 0) {
 				continue;
 			}
+
+			bool copiedThisCode = copiedFromItem == i && strcmp(copiedCodeUtf8, codeUtf8)==0;
 			
 			size_t codeLength = strlen(codeUtf8);
-			if (codeLength == 6) {
+			if (codeLength == 6) { // XXX XXX
 				codeUtf8[7] = 0;
+				codeUtf8[6] = codeUtf8[5];
+				codeUtf8[5] = codeUtf8[4];
+				codeUtf8[4] = codeUtf8[3];
+				codeUtf8[3] = ' ';
+			} else if (codeLength == 8) { // XXXX XXXX
+				codeUtf8[9] = 0;
+				codeUtf8[8] = codeUtf8[7];
+				codeUtf8[7] = codeUtf8[6];
+				codeUtf8[6] = codeUtf8[5];
+				codeUtf8[5] = codeUtf8[4];
+				codeUtf8[4] = ' ';
+			} else if (codeLength == 10) { // XXX XXX XXXX
+				codeUtf8[12] = 0;
+				codeUtf8[11] = codeUtf8[9];
+				codeUtf8[10] = codeUtf8[8];
+				codeUtf8[9] = codeUtf8[7];
+				codeUtf8[8] = codeUtf8[6];
+				codeUtf8[7] = ' ';
 				codeUtf8[6] = codeUtf8[5];
 				codeUtf8[5] = codeUtf8[4];
 				codeUtf8[4] = codeUtf8[3];
@@ -1259,7 +1283,21 @@ void PaintAccounts(HDC hdc)
 			SetTextColor(itemDC, oldColor);
 			SelectClipRgn(itemDC, NULL);
 			DeleteObject(redCode);
-					
+
+			if (copiedThisCode) {
+				SelectObject(itemDC, iconFont);
+				RECT copiedRect = codeRect;
+				copiedRect.bottom = codeRect.top;
+				copiedRect.top = copiedRect.bottom - textHeight;
+				copiedRect.left = copiedRect.right - codeWidth;
+				DrawText(itemDC, L"Copied", -1, &copiedRect, DT_SINGLELINE|DT_CENTER|DT_BOTTOM|DT_NOCLIP);
+
+				copiedRect.top = codeRect.top + textHeight;
+				copiedRect.bottom = copiedRect.top + textHeight;
+				DrawText(itemDC, L"to clipboard", -1, &copiedRect, DT_SINGLELINE|DT_CENTER|DT_TOP|DT_NOCLIP);
+				SelectObject(itemDC, font);
+			}
+
 			// Time a redraw for when the above clipping region grows by a pixel.
 			if (codeDrawingProgressTimer) {
 				KillTimer(mainWnd, codeDrawingProgressTimer);
@@ -1350,6 +1388,18 @@ void CopyAsciiToClipboard(const char *ascii)
 	CloseClipboard();
 }
 
+void EditAccount(int idx)
+{
+}
+
+void DeleteAccount(int idx)
+{
+	if (delete_account(idx)) {
+		MessageBox(mainWnd, L"Deleting failed", L"Error", MB_ICONERROR);
+	}
+	InvalidateRect(mainWnd, NULL, FALSE);
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -1427,18 +1477,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_VSCROLL:
 		{
 			int type = LOWORD(wParam);
+			int dScroll = 0;
 			if (type == SB_THUMBPOSITION || type == SB_THUMBTRACK) {
-
-
 				int pos = HIWORD(wParam);
 				SetScrollPos(scroll, SB_CTL, pos, FALSE);
-				RECT r;
-				r.left = 0;
-				r.right = scrollRect.left;
-				r.bottom = scrollRect.bottom;
-				r.top = scrollRect.top;
-				InvalidateRect(hWnd, &r, FALSE);
+			} else if (type == SB_PAGEUP) {
+				dScroll = -(scrollRect.bottom - scrollRect.top);
+			} else if (type == SB_PAGEDOWN) {
+				dScroll =  scrollRect.bottom - scrollRect.top;
+			} else if (type == SB_LINEDOWN) {
+				dScroll = sizeBasis*4;
+			} else if (type == SB_LINEUP) {
+				dScroll = -sizeBasis*4;
+			} else {
+				break;
 			}
+			if (dScroll) {
+				SetScrollPos(scroll, SB_CTL, GetScrollPos(scroll, SB_VERT) + dScroll, FALSE);
+			}
+			RECT r;
+			r.left = 0;
+			r.right = scrollRect.left;
+			r.bottom = scrollRect.bottom;
+			r.top = scrollRect.top;
+			InvalidateRect(hWnd, &r, FALSE);
 		}
 		break;
 	case WM_PAINT:
@@ -1508,6 +1570,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					get_code(selectedItem, (uint8_t *)codeUtf8, sizeof(codeUtf8), &millisPerCode, &millisIntoCode);
 
 					CopyAsciiToClipboard(codeUtf8);
+					memcpy(copiedCodeUtf8, codeUtf8, sizeof(copiedCodeUtf8));
+					copiedFromItem = selectedItem;
+					InvalidateRect(mainWnd, NULL, FALSE);
 				}
 				return true;
 			}
@@ -1516,6 +1581,42 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_LBUTTONUP:
 	case WM_RBUTTONUP:
 		UpdateMouseCursor();
+		return DefWindowProc(hWnd, message, wParam, lParam);
+	case WM_CONTEXTMENU:
+		{
+
+			if (activeTab == IDC_TAB_ACCOUNTS && selectedItem >= 0) {
+				int clickedItem = selectedItem;
+				WCHAR accountNameBuf[256];
+				uint8_t accountNameUtf8[256];
+				get_account_name(clickedItem, accountNameUtf8, sizeof(accountNameUtf8));
+				MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (const char *)accountNameUtf8, sizeof(accountNameUtf8)/sizeof(*accountNameUtf8), accountNameBuf, sizeof(accountNameBuf)/sizeof(*accountNameBuf));
+
+				WCHAR editMessage[300] = L"Edit ";
+				WCHAR deleteMessage[300] = L"Delete ";
+				wcscat_s(editMessage, accountNameBuf);
+				wcscat_s(deleteMessage, accountNameBuf);
+
+				HMENU menu = CreatePopupMenu();
+				AppendMenu(menu, MF_STRING|MF_ENABLED, 1, editMessage);
+				AppendMenu(menu, MF_STRING|MF_ENABLED, 2, deleteMessage);
+				POINT cursor;
+				::GetCursorPos(&cursor);
+				int ret = TrackPopupMenu(menu, TPM_RETURNCMD|TPM_NONOTIFY, cursor.x, cursor.y, 0, mainWnd, NULL);
+				if (ret == 1) {
+					EditAccount(clickedItem);
+				} else if (ret == 2) {
+					WCHAR deleteMessageBuf[512] = L"Are you sure you want to delete ";
+					wcscat_s(deleteMessageBuf, accountNameBuf);
+					wcscat_s(deleteMessageBuf, L"?");
+					
+					if (MessageBox(mainWnd, deleteMessageBuf, L"Confirm Account Deletion", MB_ICONWARNING|MB_YESNO)==IDYES) {
+						DeleteAccount(clickedItem);
+					}
+				}
+				
+			}
+		}
 		break;
 	case WM_CTLCOLOREDIT:
 		{

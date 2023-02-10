@@ -13,21 +13,39 @@ use std::time::UNIX_EPOCH;
 use url::Url;
 use std::ffi::CStr;
 use totp_lite::totp_custom;
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, remove_file, rename};
 use std::io::Write;
 
 static ACCOUNTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
     Mutex::new(vec![])
 });
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 enum Algorithm {
     Sha1,
     Sha256,
     Sha512,
 }
 
-#[derive(Debug)]
+impl Algorithm {
+    fn as_u32(self) -> u32 {
+        match self {
+            Algorithm::Sha1 => 1,
+            Algorithm::Sha256 => 256,
+            Algorithm::Sha512 => 512,
+        }
+    }
+    
+    fn url_encoding(self) -> &'static str {
+        match self {
+            Algorithm::Sha1 => "SHA1",
+            Algorithm::Sha256 => "SHA256",
+            Algorithm::Sha512 => "SHA512",
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 struct Account {
     name: String,
     secret: Vec<u8>,
@@ -50,6 +68,7 @@ enum TotpError {
     MalformedPeriod,
     MalformedName,
     FileWriteError,
+    AccountNotFound,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -63,6 +82,33 @@ impl Error for TotpError {
 
 
 impl Account {
+    fn from_c_params(name_str: &CStr, code_str: &CStr, algorithm: u32, period: u32, digits: u32) -> Result<Account, TotpError> {
+        Ok(Account {
+            name: name_str.to_str().map_err(|_| TotpError::MalformedName)?.to_string(),
+            secret: base32::decode(base32::Alphabet::RFC4648{padding: false}, code_str.to_str().map_err(|_| TotpError::MalformedSecret)?).ok_or(TotpError::MalformedSecret)?,
+            algorithm: match algorithm {
+                1 => Algorithm::Sha1,
+                256 => Algorithm::Sha256,
+                512 => Algorithm::Sha512,
+                _ => {
+                    return Err(TotpError::UnsupportedAlgorithm)
+                }
+            },
+            period: match period {
+                15 | 30 | 60 => { period as u64 },
+                _ => {
+                    return Err(TotpError::UnsupportedPeriod)
+                }
+            },
+            digits : match digits {
+                6 | 8 | 10 => { digits },
+                _ => {
+                    return Err(TotpError::UnsupportedDigitCount)
+                }
+            }
+        })
+    }
+
     fn from_url(url: &str) -> Result<Account, TotpError> {
         let url_parts = Url::parse(url).map_err(|_| TotpError::MalformedUrl)?;
         
@@ -139,11 +185,7 @@ impl Account {
         format!("otpauth://totp/?secret={}&issuer={}&algorithm={}&digits={}&period={}", 
             base32::encode(base32::Alphabet::RFC4648{padding: false}, &self.secret), 
             percent_encoding::percent_encode(self.name.as_bytes(), percent_encoding::NON_ALPHANUMERIC), 
-            match self.algorithm {
-                Algorithm::Sha1 => "SHA1",
-                Algorithm::Sha256 => "SHA256",
-                Algorithm::Sha512 => "SHA512",
-            },
+            self.algorithm.url_encoding(),
             self.digits,
             self.period)
     }
@@ -177,6 +219,11 @@ fn get_save_file() -> Result<PathBuf, Box<dyn Error>> {
     dir.push("totp.txt");
     Ok(dir)
 }
+fn get_save_temp_file() -> Result<PathBuf, Box<dyn Error>> {
+    let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
+    dir.push("totp.txt.temp");
+    Ok(dir)
+}
 
 fn load_accounts_inner() -> Result<(), Box<dyn Error>> {
     let dir = get_save_file()?;
@@ -207,7 +254,7 @@ pub extern "C" fn accounts_len() -> u32 {
     ACCOUNTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
 }
 
-fn result_to_error_code<E>(r: Result<(), E>) -> u32 {
+fn result_to_error_code<E: std::fmt::Debug>(r: Result<(), E>) -> u32 {
     if r.is_ok() {
         0
     } else {
@@ -220,7 +267,7 @@ pub extern "C" fn get_account_name(index: u32, dest: *mut u8, dest_len: u32) -> 
     result_to_error_code(get_account_name_inner(index, dest, dest_len))
 }
 
-fn get_account(accounts: &mut Vec<Account>, index: u32) -> Result<&mut Account, Box<dyn Error>> {
+fn get_account_by_index(accounts: &mut Vec<Account>, index: u32) -> Result<&mut Account, Box<dyn Error>> {
     let index: usize = index.try_into()?;
     if index >= accounts.len() {
         Err(format!("Account index out of range (index {} with length {})", index, accounts.len()))?;
@@ -233,7 +280,7 @@ fn get_account_name_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<()
     empty_string_into_buffer(dest);
     
     let mut accounts = ACCOUNTS.lock()?;
-    let account = get_account(&mut accounts, index)?;
+    let account = get_account_by_index(&mut accounts, index)?;
     
     write_to_buffer(dest, account.name.as_str())?;
     Ok( () )
@@ -249,7 +296,7 @@ fn get_code_inner(index: u32, dest: *mut u8, dest_len: u32, millis_per_code: *mu
     empty_string_into_buffer(dest);
     
     let mut accounts = ACCOUNTS.lock()?;
-    let account = get_account(&mut accounts, index)?;
+    let account = get_account_by_index(&mut accounts, index)?;
     
     let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH)?;
     let seconds: u64 = since_epoch.as_secs();
@@ -278,30 +325,7 @@ fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u
     let name_str = unsafe { CStr::from_ptr(name as *const i8) };
     let code_str = unsafe { CStr::from_ptr(code as *const i8) };
     
-    let account = Account {
-        name: name_str.to_str().map_err(|_| TotpError::MalformedName)?.to_string(),
-        secret: base32::decode(base32::Alphabet::RFC4648{padding: false}, code_str.to_str().map_err(|_| TotpError::MalformedSecret)?).ok_or(TotpError::MalformedSecret)?,
-        algorithm: match algorithm {
-            1 => Algorithm::Sha1,
-            256 => Algorithm::Sha256,
-            512 => Algorithm::Sha512,
-            _ => {
-                return Err(TotpError::UnsupportedAlgorithm)
-            }
-        },
-        period: match period {
-            15 | 30 | 60 => { period as u64 },
-            _ => {
-                return Err(TotpError::UnsupportedPeriod)
-            }
-        },
-        digits : match digits {
-            6 | 8 | 10 => { digits },
-            _ => {
-                return Err(TotpError::UnsupportedDigitCount)
-            }
-        }
-    };
+    let account = Account::from_c_params(name_str, code_str, algorithm, digits, period)?;
     
     let mut file = OpenOptions::new().append(true).open(get_save_file().map_err(|_| TotpError::FileWriteError)?).map_err(|_| TotpError::FileWriteError)?;
     file.write(format!("\r\n{}", account.to_url()).as_bytes()).map_err(|_| TotpError::FileWriteError)?;
@@ -311,6 +335,153 @@ fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u
     Ok( () )
 }
 
+
+#[no_mangle]
+pub extern "C" fn delete_account(index: u32) -> u32 {
+    result_to_error_code(delete_account_inner(index))
+}
+
+fn find_account_index(account: &Account, expected_at_line: u32, lines: &[String]) -> Option<usize> {
+    let mut best_line_idx = None;
+    let mut best_line_distance = None;
+    for (line_idx, line) in lines.iter().enumerate() {
+        let account_on_line = match Account::from_url(&line) {
+            Ok(account_on_line) => account_on_line,
+            Err(_) => { continue; }
+        };
+        if account_on_line == *account {
+            let distance = ((line_idx as i32) - (expected_at_line as i32)).abs();
+            if match best_line_distance { None => true, Some(best_line_distance) => distance < best_line_distance } {
+                best_line_idx = Some(line_idx);
+                best_line_distance = Some(distance);
+            }
+        }
+    }
+    best_line_idx
+}
+
+fn delete_account_inner(index: u32) -> Result<(), Box<dyn Error>> {
+    // We know exactly what account we want to delete in the in-memory ACCOUNTS, but there
+    // is no guarantee that the file has not changed from under us.
+    {
+        let mut accounts = ACCOUNTS.lock()?;
+        let target_account = get_account_by_index(&mut accounts, index)?;
+        
+        atomic_file_modification(&|mut data: Vec<String>| {
+            if let Some(best_line_idx) = find_account_index(target_account, index, &data) {
+                data.remove(best_line_idx);
+                Ok(data)
+            } else {
+                Err(TotpError::AccountNotFound)
+            }
+        })?;
+    }
+    
+    load_accounts_inner()?;
+    
+    Ok( () )
+}
+
+fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<String>, TotpError>) -> Result<(), Box<dyn Error>> {
+   
+    let temp_file_path = get_save_temp_file()?;
+    let data_file_path = get_save_file()?;
+    
+    if temp_file_path.exists() {
+        remove_file(&temp_file_path)?; // If this doesn't get removed, we have another instance actively working on the file. That is very strange, so report the errot to user.
+    }
+    
+    let mut temp_file = OpenOptions::new().write(true).create_new(true).open(&temp_file_path)?;
+    let mut old_data_bytes = Vec::new();
+    File::open(&data_file_path)?.read_to_end(&mut old_data_bytes)?;
+    let old_data = String::from_utf8(old_data_bytes)?;
+    let old_data_lines: Vec<String> = old_data.lines().map(|line| line.trim()).filter(|line| line.len()>0).map(|s| s.to_string()).collect();
+    let new_data_lines = modify_data(old_data_lines)?;
+    let new_data = new_data_lines.join("\r\n");
+    temp_file.write_all(new_data.as_bytes())?;
+    drop(temp_file);
+    rename(temp_file_path, data_file_path)?;
+    
+    Ok( () )
+}
+
+
+#[no_mangle]
+pub extern "C" fn get_account(index: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> u32 {
+    result_to_error_code(get_account_inner(index, name, name_len, code, code_len, algorithm, digits, period))
+}
+
+fn get_account_inner(index: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> Result<(), Box<dyn Error>> {
+    let name = unsafe { ::std::slice::from_raw_parts_mut(name, name_len.try_into()?) };
+    let code = unsafe { ::std::slice::from_raw_parts_mut(code, code_len.try_into()?) };
+    
+    let mut accounts = ACCOUNTS.lock()?;
+    let account = get_account_by_index(&mut accounts, index)?;
+    
+    write_to_buffer(name, account.name.as_str())?;
+    write_to_buffer(code, &base32::encode(base32::Alphabet::RFC4648{padding: false}, &account.secret))?;
+    
+    unsafe {
+        *algorithm = account.algorithm.as_u32();
+        *digits = account.digits as u32;
+        *period = account.period as u32;
+    }
+    
+    Ok( () )
+}
+
+#[no_mangle]
+pub extern "C" fn edit_account(index: u32, name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> u32 {
+    result_to_error_code(edit_account_inner(index, name, code, algorithm, digits, period))
+}
+
+fn edit_account_inner(index: u32, name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), Box<dyn Error>> {
+    {
+        let name_str = unsafe { CStr::from_ptr(name as *const i8) };
+        let code_str = unsafe { CStr::from_ptr(code as *const i8) };
+
+        let mut accounts = ACCOUNTS.lock()?;
+        let target_currently_is = get_account_by_index(&mut accounts, index)?;
+        
+        let target_will_be = Account::from_c_params(name_str, code_str, algorithm, digits, period)?;
+
+        atomic_file_modification(&|mut data: Vec<String>| {
+            let modify_index = if let Some(modify_index) = find_account_index(target_currently_is, index, &data) {
+                modify_index
+            } else {
+                return Err(TotpError::AccountNotFound);
+            };
+            
+            let url_parts = Url::parse(&data[modify_index]).map_err(|_| TotpError::MalformedUrl)?;
+            let mut url_modified = url_parts.clone();
+            
+            {
+                let mut modified_query = url_modified.query_pairs_mut();
+                modified_query.clear();
+                for (key, val) in url_parts.query_pairs() {
+                    match key.as_ref() {
+                        "secret" => modified_query.append_pair("secret", &base32::encode(base32::Alphabet::RFC4648{padding: false}, &target_will_be.secret)),
+                        "algorithm" => modified_query.append_pair("algorithm", target_will_be.algorithm.url_encoding()),
+                        "issuer" => modified_query.append_pair("issuer", &percent_encoding::percent_encode(target_will_be.name.as_bytes(), percent_encoding::NON_ALPHANUMERIC).to_string()),
+                        "period" => modified_query.append_pair("period", &target_will_be.period.to_string()),
+                        "digits" => modified_query.append_pair("digits", &target_will_be.digits.to_string()),
+                        _ => {
+                            modified_query.append_pair(&key, &val)
+                        }
+                    };
+                };
+            }
+            
+            data[modify_index] = url_modified.to_string();
+            
+            Ok(data)
+        })?;
+    }
+    
+    load_accounts_inner()?;
+    
+    Ok( () )
+}
 
 #[test]
 fn otpauth_example() {
@@ -329,7 +500,7 @@ fn otpauth_no_issuer_example() {
     assert_eq!(account.algorithm, Algorithm::Sha1);
     assert_eq!(account.name, "ACME Co");
 }
-
+/*
 #[test]
 fn get_account_name_test() {
     load_accounts_inner().unwrap();
@@ -338,11 +509,26 @@ fn get_account_name_test() {
     println!("{:?}", buf);
     panic!();
 }
+*/
 
-/*
 #[test]
 fn load_account_test() {
     load_accounts();
+    
+    let mut name_buf = [0u8; 255];
+    let mut code_buf = [0u8; 255];
+    let mut algorithm: u32 = 0;
+    let mut period: u32 = 0;
+    let mut digits: u32 = 0;
+    assert_eq!(get_account(2, name_buf.as_mut_ptr(), 255, code_buf.as_mut_ptr(), 255, &mut algorithm, &mut digits, &mut period), 0);
+    println!("{:?} {:?} {} {} {}", unsafe { CStr::from_ptr(name_buf.as_ptr() as *const u8 as *const i8) }, unsafe { CStr::from_ptr(code_buf.as_ptr() as *const u8 as *const i8) }, algorithm, period, digits);
+    
     println!("{:?}", &ACCOUNTS.lock().unwrap());
+    
+    assert_eq!(delete_account(2), 0);
+    //assert_eq!(edit_account(2, name_buf.as_ptr(), code_buf.as_ptr(), 256, 15, 10), 0);
+    
     panic!();
-}*/
+    
+    
+}
