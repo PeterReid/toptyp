@@ -44,6 +44,7 @@ extern "C" {
 	uint32_t delete_account(uint32_t index);
 	uint32_t get_account(uint32_t index, uint8_t *name, uint32_t name_len, uint8_t *code, uint32_t code_len, uint32_t *algorithm, uint32_t *digits, uint32_t *period);
 	uint32_t edit_account(uint32_t index, uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
+	uint32_t scan(uint8_t *brightness, uint32_t width, uint32_t height);
 }
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
@@ -1499,6 +1500,24 @@ void DeleteAccount(int idx)
 		MessageBox(mainWnd, L"Deleting failed", L"Error", MB_ICONERROR);
 	}
 	InvalidateRect(mainWnd, NULL, FALSE);
+}
+
+void RunScan()
+{
+	HDC hScreenDC = GetDC(nullptr); // CreateDC("DISPLAY",nullptr,nullptr,nullptr);
+	HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
+	int width = GetDeviceCaps(hScreenDC,HORZRES);
+	int height = GetDeviceCaps(hScreenDC,VERTRES);
+	HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC,width,height);
+	HBITMAP hOldBitmap = static_cast<HBITMAP>(SelectObject(hMemoryDC,hBitmap));
+	BitBlt(hMemoryDC,0,0,width,height,hScreenDC,0,0,SRCCOPY);
+	hBitmap = static_cast<HBITMAP>(SelectObject(hMemoryDC,hOldBitmap));
+	DeleteDC(hMemoryDC);
+	DeleteDC(hScreenDC);
+
+
+
+	DeleteObject(hBitmap);
 }
 
 //

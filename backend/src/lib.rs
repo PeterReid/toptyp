@@ -69,6 +69,7 @@ enum TotpError {
     MalformedName = 11,
     FileWriteError = 12,
     AccountNotFound = 13,
+    ImageTooLarge = 14,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -429,6 +430,33 @@ fn get_account_inner(index: u32, name: *mut u8, name_len: u32, code: *mut u8, co
         *period = account.period as u32;
     }
     
+    Ok( () )
+}
+
+#[no_mangle]
+pub extern "C" fn scan(brightness: *const u8, width: u32, height: u32) -> u32 {
+    result_to_error_code(scan_inner(brightness, width, height))
+}
+
+fn scan_inner(brightness: *const u8, width: u32, height: u32) -> Result<(), Box<dyn Error>> {
+    let width: usize = width.try_into()?;
+    let height: usize = height.try_into()?;
+    let byte_count = width.checked_mul(height).ok_or(TotpError::ImageTooLarge)?;
+    let brightness = unsafe { ::std::slice::from_raw_parts(brightness, byte_count) };
+
+    // create a decoder
+    let mut decoder = quircs::Quirc::default();
+
+    // identify all qr codes
+    let codes = decoder.identify(width as usize, height as usize, &brightness);
+
+    for code in codes {
+        if let Ok(extracted_code) = code {
+            if let Ok(decoded) = extracted_code.decode() {
+                println!("qrcode: {}", std::str::from_utf8(&decoded.payload).unwrap());
+            }
+        }
+    }
     Ok( () )
 }
 
