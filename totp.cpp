@@ -106,6 +106,13 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 	return (int) msg.wParam;
 }
 
+void InvalidateAboveToolbar()
+{
+	RECT r;
+	GetClientRect(mainWnd, &r);
+	r.bottom -= bottomButtonHeight;
+	InvalidateRect(mainWnd, &r, TRUE);
+}
 
 
 //
@@ -1170,7 +1177,7 @@ void SetActiveTab(int idc, bool andShow)
 		break;
 	}
 
-	if (andShow) InvalidateRect(mainWnd, NULL, TRUE);
+	if (andShow) InvalidateAboveToolbar();
 
 }
 
@@ -1481,7 +1488,7 @@ void EditAccount(int idx)
 	if (algorithm != 1 || digits != 6 || period != 30) {
 		ShowAdvancedAddOptions(algorithm, digits, period);
 	}
-	InvalidateRect(mainWnd, NULL, TRUE);
+	InvalidateAboveToolbar();
 	ShowCreatedAddControls();
 	editingAccountIndex = idx;
 }
