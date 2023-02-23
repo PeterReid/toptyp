@@ -1146,9 +1146,11 @@ void SetActiveTab(int idc, bool andShow)
 		break;
 	}
 
-	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
+	HWND oldTabButton = GetDlgItem(mainWnd, activeTab);
+	if (oldTabButton) InvalidateRect(oldTabButton, NULL, FALSE);
 	activeTab = idc;
-	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
+	HWND newTabButton = GetDlgItem(mainWnd, activeTab);
+	if (newTabButton) InvalidateRect(newTabButton, NULL, FALSE);
 	
 	switch (activeTab) {
 	case IDC_TAB_ACCOUNTS: 
@@ -1168,7 +1170,7 @@ void SetActiveTab(int idc, bool andShow)
 		break;
 	}
 
-	InvalidateRect(mainWnd, NULL, TRUE);
+	if (andShow) InvalidateRect(mainWnd, NULL, TRUE);
 
 }
 
@@ -1479,6 +1481,7 @@ void EditAccount(int idx)
 	if (algorithm != 1 || digits != 6 || period != 30) {
 		ShowAdvancedAddOptions(algorithm, digits, period);
 	}
+	InvalidateRect(mainWnd, NULL, TRUE);
 	ShowCreatedAddControls();
 	editingAccountIndex = idx;
 }
