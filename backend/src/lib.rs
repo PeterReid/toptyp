@@ -457,22 +457,45 @@ fn edit_account_inner(index: u32, name: *const u8, code: *const u8, algorithm: u
             let url_parts = Url::parse(&data[modify_index]).map_err(|_| TotpError::MalformedUrl)?;
             let mut url_modified = url_parts.clone();
             
+            let mut secret = Some(base32::encode(base32::Alphabet::RFC4648{padding: false}, &target_will_be.secret));
+            let mut algorithm = Some(target_will_be.algorithm.url_encoding());
+            let mut issuer = Some(percent_encoding::percent_encode(target_will_be.name.as_bytes(), percent_encoding::NON_ALPHANUMERIC).to_string());
+            let mut period = Some(target_will_be.period.to_string());
+            let mut digits = Some(target_will_be.digits.to_string());
+            
             {
                 let mut modified_query = url_modified.query_pairs_mut();
                 modified_query.clear();
                 for (key, val) in url_parts.query_pairs() {
                     match key.as_ref() {
-                        "secret" => modified_query.append_pair("secret", &base32::encode(base32::Alphabet::RFC4648{padding: false}, &target_will_be.secret)),
-                        "algorithm" => modified_query.append_pair("algorithm", target_will_be.algorithm.url_encoding()),
-                        "issuer" => modified_query.append_pair("issuer", &percent_encoding::percent_encode(target_will_be.name.as_bytes(), percent_encoding::NON_ALPHANUMERIC).to_string()),
-                        "period" => modified_query.append_pair("period", &target_will_be.period.to_string()),
-                        "digits" => modified_query.append_pair("digits", &target_will_be.digits.to_string()),
+                        "secret" => if let Some(secret) = secret.take() { modified_query.append_pair("secret", &secret); },
+                        "algorithm" => if let Some(algorithm) = algorithm.take() { modified_query.append_pair("algorithm", algorithm); },
+                        "issuer" => if let Some(issuer) = issuer.take() { modified_query.append_pair("issuer", &issuer); },
+                        "period" => if let Some(period) = period.take() { modified_query.append_pair("period", &period); },
+                        "digits" => if let Some(digits) = digits.take() { modified_query.append_pair("digits", &digits); },
                         _ => {
-                            modified_query.append_pair(&key, &val)
+                            modified_query.append_pair(&key, &val);
                         }
                     };
                 };
+                
+                if let Some(secret) = secret {
+                    modified_query.append_pair("secret", &secret);
+                }
+                if let Some(algorithm) = algorithm {
+                    modified_query.append_pair("algorithm", &algorithm);
+                }
+                if let Some(issuer) = issuer {
+                    modified_query.append_pair("issuer", &issuer);
+                }
+                if let Some(period) = period {
+                    modified_query.append_pair("period", &period);
+                }
+                if let Some(digits) = digits {
+                    modified_query.append_pair("digits", &digits);
+                }
             }
+            
             
             data[modify_index] = url_modified.to_string();
             

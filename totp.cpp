@@ -1567,6 +1567,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDC_ADVANCED:
 			ShowAdvancedAddOptions(1, 6, 30);
+			ShowCreatedAddControls();
 			break;
 		case IDC_SAVE:
 			SaveAccount();
