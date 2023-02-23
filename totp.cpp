@@ -1691,7 +1691,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				int clickedItem = selectedItem;
 				WCHAR accountNameBuf[256];
 				uint8_t accountNameUtf8[256];
-				get_account_name(clickedItem, accountNameUtf8, sizeof(accountNameUtf8));
+				if (get_account_name(clickedItem, accountNameUtf8, sizeof(accountNameUtf8))) break;
+
 				MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (const char *)accountNameUtf8, sizeof(accountNameUtf8)/sizeof(*accountNameUtf8), accountNameBuf, sizeof(accountNameBuf)/sizeof(*accountNameBuf));
 
 				WCHAR editMessage[300] = L"Edit ";
