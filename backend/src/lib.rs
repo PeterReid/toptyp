@@ -56,19 +56,19 @@ struct Account {
 
 #[derive(Debug)]
 enum TotpError {
-    MalformedUrl,
-    UnsupportedCodeType,
-    DuplicateQueryParameters,
-    MalformedSecret,
-    UnsupportedDigitCount,
-    UnsupportedPeriod,
-    UnsupportedAlgorithm,
-    MissingSecret,
-    MalformedDigits,
-    MalformedPeriod,
-    MalformedName,
-    FileWriteError,
-    AccountNotFound,
+    MalformedUrl = 1,
+    UnsupportedCodeType = 2,
+    DuplicateQueryParameters = 3,
+    MalformedSecret = 4,
+    UnsupportedDigitCount = 5,
+    UnsupportedPeriod = 6,
+    UnsupportedAlgorithm = 7,
+    MissingSecret = 8,
+    MalformedDigits = 9,
+    MalformedPeriod = 10,
+    MalformedName = 11,
+    FileWriteError = 12,
+    AccountNotFound = 13,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -82,7 +82,7 @@ impl Error for TotpError {
 
 
 impl Account {
-    fn from_c_params(name_str: &CStr, code_str: &CStr, algorithm: u32, period: u32, digits: u32) -> Result<Account, TotpError> {
+    fn from_c_params(name_str: &CStr, code_str: &CStr, algorithm: u32, digits: u32, period: u32) -> Result<Account, TotpError> {
         Ok(Account {
             name: name_str.to_str().map_err(|_| TotpError::MalformedName)?.to_string(),
             secret: base32::decode(base32::Alphabet::RFC4648{padding: false}, code_str.to_str().map_err(|_| TotpError::MalformedSecret)?).ok_or(TotpError::MalformedSecret)?,
@@ -146,7 +146,7 @@ impl Account {
                     })
                 }
                 "issuer" => {
-                    issuer = Some(val.into_owned());
+                    issuer = Some(percent_encoding::percent_decode_str(&val).decode_utf8_lossy().to_string());
                 }
                 "period" => {
                     period = Some(val.as_ref().parse().map_err(|_| TotpError::MalformedPeriod)?)
@@ -162,7 +162,7 @@ impl Account {
         let algorithm = algorithm.unwrap_or(Algorithm::Sha1);
         let digits = digits.unwrap_or(6);
         let period = period.unwrap_or(30);
-        let name = issuer.or(path_issuer).unwrap_or_else(|| "Untitled".to_string());
+        let name = issuer.or(path_issuer).unwrap_or_else(|| without_slash.to_string());
         let secret = secret.ok_or(TotpError::MissingSecret)?;
         
         if digits != 6 && digits != 8 && digits != 10 {
@@ -321,16 +321,17 @@ pub extern "C" fn add_account(name: *const u8, code: *const u8, algorithm: u32, 
     result_to_error_code(add_account_inner(name, code, algorithm, digits, period))
 }
 
-fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), TotpError> {
+fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), Box<dyn Error>> {
     let name_str = unsafe { CStr::from_ptr(name as *const i8) };
     let code_str = unsafe { CStr::from_ptr(code as *const i8) };
     
     let account = Account::from_c_params(name_str, code_str, algorithm, digits, period)?;
-    
-    let mut file = OpenOptions::new().append(true).open(get_save_file().map_err(|_| TotpError::FileWriteError)?).map_err(|_| TotpError::FileWriteError)?;
-    file.write(format!("\r\n{}", account.to_url()).as_bytes()).map_err(|_| TotpError::FileWriteError)?;
+    atomic_file_modification(&|mut data: Vec<String>| {
+        data.push(account.to_url());
+        Ok( data )
+    })?;
 
-    let _ = load_accounts_inner();
+    load_accounts_inner()?;
     
     Ok( () )
 }
@@ -383,7 +384,6 @@ fn delete_account_inner(index: u32) -> Result<(), Box<dyn Error>> {
 }
 
 fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<String>, TotpError>) -> Result<(), Box<dyn Error>> {
-   
     let temp_file_path = get_save_temp_file()?;
     let data_file_path = get_save_file()?;
     
@@ -393,7 +393,9 @@ fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<Stri
     
     let mut temp_file = OpenOptions::new().write(true).create_new(true).open(&temp_file_path)?;
     let mut old_data_bytes = Vec::new();
-    File::open(&data_file_path)?.read_to_end(&mut old_data_bytes)?;
+    if data_file_path.exists() {
+        File::open(&data_file_path)?.read_to_end(&mut old_data_bytes)?;
+    }
     let old_data = String::from_utf8(old_data_bytes)?;
     let old_data_lines: Vec<String> = old_data.lines().map(|line| line.trim()).filter(|line| line.len()>0).map(|s| s.to_string()).collect();
     let new_data_lines = modify_data(old_data_lines)?;
@@ -512,7 +514,15 @@ fn get_account_name_test() {
 */
 
 #[test]
+fn add_account_test() {
+    
+    assert_eq!(add_account(b"Ninja\0".as_ptr(), b"BSAPF2T4OEVIAB2D".as_ptr(), 1, 6, 30), 0);
+    panic!();
+}
+
+#[test]
 fn load_account_test() {
+    
     load_accounts();
     
     let mut name_buf = [0u8; 255];

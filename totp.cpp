@@ -33,6 +33,7 @@ UINT_PTR codeDrawingProgressTimer = 0;
 
 int copiedFromItem = -1;
 char copiedCodeUtf8[50] = { 0 };
+uint32_t editingAccountIndex = 0;
 
 extern "C" {
 	uint32_t load_accounts();
@@ -41,6 +42,8 @@ extern "C" {
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
 	uint32_t delete_account(uint32_t index);
+	uint32_t get_account(uint32_t index, uint8_t *name, uint32_t name_len, uint8_t *code, uint32_t code_len, uint32_t *algorithm, uint32_t *digits, uint32_t *period);
+	uint32_t edit_account(uint32_t index, uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
 }
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
@@ -54,7 +57,7 @@ int sizeBasis = 0;
 int bottomButtonHeight = 0;
 int textBoxHeight = 0;
 
-void SetActiveTab(int idc);
+void SetActiveTab(int idc, bool andShow);
 
 int APIENTRY _tWinMain(HINSTANCE hInstance,
                      HINSTANCE hPrevInstance,
@@ -662,6 +665,23 @@ HintingEditData searchHintingEditData = { TRUE, FALSE, L"Search..." };
 HintingEditData addAccountTabNameEditData = { TRUE, FALSE, L"e.g. example.com" };
 HintingEditData addAccountTabCodeEditData = { TRUE, FALSE, L"e.g. L9WPBRYZLHALSNMW" };
 
+void ResetHintingEditData(HintingEditData *data) {
+	data->showingHint = TRUE;
+	data->hasFocus = FALSE;
+}
+
+void SetHintingEditText(HWND wnd, LPCTSTR text)
+{
+	HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr(wnd, GWLP_USERDATA);
+	if (*text == 0) {
+		SetWindowText(wnd, hintingEditData->hintText);
+		hintingEditData->showingHint = true;
+	} else {
+		SetWindowText(wnd, text);
+		hintingEditData->showingHint = false;
+	}
+}
+
 //
 //   FUNCTION: InitInstance(HINSTANCE, int)
 //
@@ -675,7 +695,7 @@ HintingEditData addAccountTabCodeEditData = { TRUE, FALSE, L"e.g. L9WPBRYZLHALSN
 
 HWND CreateHintingEdit(RECT r, int idc, HintingEditData *hintData)
 {
-	HWND edit = CreateWindow(_T("EDIT"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, r.left,r.top, r.right - r.left,r.bottom - r.top, mainWnd, (HMENU)idc, NULL, NULL);
+	HWND edit = CreateWindow(_T("EDIT"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, r.left,r.top, r.right - r.left,r.bottom - r.top, mainWnd, (HMENU)idc, NULL, NULL);
 	SetWindowLongPtr(edit, GWLP_USERDATA, (LONG_PTR)hintData);
 	SetWindowText(edit, hintData->hintText);
 	SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
@@ -738,6 +758,9 @@ struct TabParam {
 
 void InitAddTab()
 {
+	ResetHintingEditData(&addAccountTabNameEditData);
+	ResetHintingEditData(&addAccountTabCodeEditData);
+
 	RECT mainRect;
 	GetClientRect(mainWnd, &mainRect);
 
@@ -767,9 +790,9 @@ void InitAddTab()
 	RECT saveButtonRect = addAccountTab.codeEditArea;
 	saveButtonRect.left = (mainRect.left + mainRect.right - saveButtonWidth)/2;
 	saveButtonRect.right = saveButtonRect.left + saveButtonWidth;
-	saveButtonRect.top = mainRect.bottom - bottomButtonHeight - sizeBasis*4;// addAccountTab.codeEditArea.bottom + sizeBasis*3; for simple mod
+	saveButtonRect.top = mainRect.bottom - bottomButtonHeight - sizeBasis*4;
 	saveButtonRect.bottom = saveButtonRect.top + sizeBasis*5/2;
-	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
+	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
 	SetWindowText(addAccountTab.saveButton, L"Save");
 	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
 
@@ -779,7 +802,7 @@ void InitAddTab()
 	advancedButtonRect.top = componentTop + (componentBottom - componentTop) * 2 / 5 + componentPlacementFromTop;
 	advancedButtonRect.bottom = advancedButtonRect.top + sizeBasis*5/2;
 
-	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
+	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
 	SetWindowText(addAccountTab.advancedButton, L"Show Advanced Options");
 	SetWindowSubclass(addAccountTab.advancedButton, SaveButtonProc, 0, 0);
 
@@ -788,7 +811,7 @@ void InitAddTab()
 		L"Secret Code",
 	};
 	for (int i=0; i<2; i++) {
-		addAccountTab.labels[i] = CreateWindowW(L"STATIC", labels[i], WS_CHILD|WS_VISIBLE, 
+		addAccountTab.labels[i] = CreateWindowW(L"STATIC", labels[i], WS_CHILD, 
 			addAccountTab.nameEditArea.left, 
 			componentTop + (componentBottom - componentTop) * i / 5,//addAccountTab.nameEditArea.top - sizeBasis*2/3 - textBoxHeight, 
 			addAccountTab.nameEditArea.right - addAccountTab.nameEditArea.left, 
@@ -797,7 +820,7 @@ void InitAddTab()
 	}
 }
 
-void ShowAdvancedAddOptions() {
+void ShowAdvancedAddOptions(uint32_t algorithm, uint32_t digits, uint32_t period) {
 	DestroyWindow(addAccountTab.advancedButton);
 	addAccountTab.advancedButton = NULL;
 	RECT mainRect;
@@ -852,7 +875,7 @@ void ShowAdvancedAddOptions() {
 			radioArea.right = margin + (mainRect.right - margin - margin) * (i+1) / 3;
 
 			TabParam tabParam = wnds[buttonSet][i];
-			*tabParam.wnd = CreateWindow(_T("BUTTON"), tabParam.text, WS_CHILD|WS_VISIBLE|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
+			*tabParam.wnd = CreateWindow(_T("BUTTON"), tabParam.text, WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
 			SetWindowSubclass(*tabParam.wnd, RadioButtonProc, 0, 0);
 		}
 	}
@@ -866,7 +889,7 @@ void ShowAdvancedAddOptions() {
 	};
 	for (int i=0; i<5; i++) {
 		if  (addAccountTab.labels[i]) continue;
-		addAccountTab.labels[i] = CreateWindowW(L"STATIC", labels[i], WS_CHILD|WS_VISIBLE, 
+		addAccountTab.labels[i] = CreateWindowW(L"STATIC", labels[i], WS_CHILD, 
 			addAccountTab.nameEditArea.left, 
 			componentTop + (componentBottom - componentTop) * i / 5,//addAccountTab.nameEditArea.top - sizeBasis*2/3 - textBoxHeight, 
 			addAccountTab.nameEditArea.right - addAccountTab.nameEditArea.left, 
@@ -876,10 +899,30 @@ void ShowAdvancedAddOptions() {
 
 	SetWindowPos(addAccountTab.saveButton, addAccountTab.period60, 0,0,0,0, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE);
 
-	Button_SetCheck(addAccountTab.algorithmSha1, BST_CHECKED);
-	Button_SetCheck(addAccountTab.tokenLength6, BST_CHECKED);
-	Button_SetCheck(addAccountTab.period30, BST_CHECKED);
+	Button_SetCheck(algorithm==1 ? addAccountTab.algorithmSha1 : algorithm==256 ? addAccountTab.algorithmSha256 : addAccountTab.algorithmSha512, BST_CHECKED);
+	Button_SetCheck(digits==6 ? addAccountTab.tokenLength6 : digits==8 ? addAccountTab.tokenLength8 : addAccountTab.tokenLength10, BST_CHECKED);
+	Button_SetCheck(period==15 ? addAccountTab.period15 : period==30 ? addAccountTab.period30 : addAccountTab.period60, BST_CHECKED);
 }
+
+void ShowCreatedAddControls()
+{
+	HWND wnds[] = {
+		addAccountTab.nameEdit, addAccountTab.codeEdit, addAccountTab.saveButton, addAccountTab.advancedButton,
+		addAccountTab.tokenLength6, addAccountTab.tokenLength8, addAccountTab.tokenLength10,
+		addAccountTab.algorithmSha1, addAccountTab.algorithmSha256, addAccountTab.algorithmSha512,
+		addAccountTab.period15, addAccountTab.period30, addAccountTab.period60,
+		addAccountTab.labels[0], addAccountTab.labels[1], addAccountTab.labels[2], addAccountTab.labels[3], addAccountTab.labels[4]
+	};
+
+	HDWP defer = BeginDeferWindowPos(sizeof(wnds)/sizeof(HWND));
+	for (size_t i=0; i<sizeof(wnds)/sizeof(HWND); i++) {
+		if (wnds[i]) {
+			DeferWindowPos(defer, wnds[i], NULL, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOREPOSITION|SWP_NOZORDER|SWP_NOSIZE|SWP_SHOWWINDOW);
+		}
+	}
+	EndDeferWindowPos(defer);
+}
+
 void DestroyAddTab()
 {
 	HWND wnds[] = {
@@ -916,9 +959,16 @@ void SaveAccount()
 	uint8_t codeUtf8[512];
 	WideCharToMultiByte(CP_UTF8, 0, nameBuffer, -1, (char *)nameUtf8, sizeof(nameUtf8), 0, 0);
 	WideCharToMultiByte(CP_UTF8, 0, codeBuffer, -1, (char *)codeUtf8, sizeof(codeUtf8), 0, 0);
-	add_account(nameUtf8, codeUtf8, algorithm, tokenLength, period);
 
-	SetActiveTab(IDC_TAB_ACCOUNTS);
+	int err = activeTab == IDC_TAB_ADD
+		? add_account(nameUtf8, codeUtf8, algorithm, tokenLength, period)
+		: edit_account(editingAccountIndex, nameUtf8, codeUtf8, algorithm, tokenLength, period);
+	if (err) {
+		MessageBox(mainWnd, L"The edit operation failed", L"Error", MB_ICONERROR|MB_OK);
+		return;
+	}
+
+	SetActiveTab(IDC_TAB_ACCOUNTS, true);
 }
 
 struct {
@@ -1027,7 +1077,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    SetWindowSubclass(addTabWnd, AddButtonProc, 0, 0);
    SetWindowSubclass(accountsTabWnd, AccountsButtonProc, 0, 0);
 
-   SetActiveTab(IDC_TAB_ACCOUNTS);
+   SetActiveTab(IDC_TAB_ACCOUNTS, true);
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
@@ -1079,26 +1129,43 @@ HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF o
 	return bmp;
 }
 
-void SetActiveTab(int idc)
+void SetActiveTab(int idc, bool andShow)
 {
 	if (activeTab == idc) return;
 
-	
 	switch (activeTab) {
-	case IDC_TAB_ACCOUNTS: DestroyAccountsTab(); break;
-	case IDC_TAB_ADD: DestroyAddTab(); break;
-	case IDC_TAB_SCAN: DestroyScanTab(); break;
+	case IDC_TAB_ACCOUNTS: 
+		DestroyAccountsTab(); 
+		break;
+	case IDC_TAB_ADD: 
+	case IDC_TAB_EDIT: 
+		DestroyAddTab(); 
+		break;
+	case IDC_TAB_SCAN: 
+		DestroyScanTab(); 
+		break;
 	}
 
 	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
 	activeTab = idc;
 	InvalidateRect(GetDlgItem(mainWnd, activeTab), NULL, FALSE);
-
 	
 	switch (activeTab) {
-	case IDC_TAB_ACCOUNTS: InitAccountsTab(); break;
-	case IDC_TAB_ADD: InitAddTab(); break;
-	case IDC_TAB_SCAN: InitScanTab(); break;
+	case IDC_TAB_ACCOUNTS: 
+		InitAccountsTab(); 
+		break;
+	case IDC_TAB_ADD: 
+	case IDC_TAB_EDIT: 
+		{
+			InitAddTab(); 
+			if (andShow) {
+				ShowCreatedAddControls();
+			}
+			break;
+		}
+	case IDC_TAB_SCAN: 
+		InitScanTab(); 
+		break;
 	}
 
 	InvalidateRect(mainWnd, NULL, TRUE);
@@ -1390,6 +1457,30 @@ void CopyAsciiToClipboard(const char *ascii)
 
 void EditAccount(int idx)
 {
+	uint8_t nameUtf8[256];
+	uint8_t codeUtf8[256];
+	WCHAR nameBuf[256];
+	WCHAR codeBuf[256];
+
+	uint32_t algorithm, digits, period;
+	if (get_account(idx, nameUtf8, sizeof(nameUtf8), codeUtf8, sizeof(codeUtf8), &algorithm, &digits, &period)) {
+		MessageBox(mainWnd, L"Failed to load account details", L"Error", MB_ICONERROR);
+		return;
+	}
+
+	MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (const char *)nameUtf8, sizeof(nameUtf8)/sizeof(*nameUtf8), nameBuf, sizeof(nameBuf)/sizeof(*nameBuf));
+	MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (const char *)codeUtf8, sizeof(codeUtf8)/sizeof(*codeUtf8), codeBuf, sizeof(codeBuf)/sizeof(*codeBuf));
+
+	SetActiveTab(IDC_TAB_EDIT, false);
+
+	SetHintingEditText(addAccountTab.nameEdit, nameBuf);
+	SetHintingEditText(addAccountTab.codeEdit, codeBuf);
+
+	if (algorithm != 1 || digits != 6 || period != 30) {
+		ShowAdvancedAddOptions(algorithm, digits, period);
+	}
+	ShowCreatedAddControls();
+	editingAccountIndex = idx;
 }
 
 void DeleteAccount(int idx)
@@ -1462,10 +1553,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case IDC_TAB_ACCOUNTS:
 		case IDC_TAB_ADD:
 		case IDC_TAB_SCAN:
-			SetActiveTab(wmId);
+			SetActiveTab(wmId, true);
 			break;
 		case IDC_ADVANCED:
-			ShowAdvancedAddOptions();
+			ShowAdvancedAddOptions(1, 6, 30);
 			break;
 		case IDC_SAVE:
 			SaveAccount();
@@ -1509,7 +1600,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 			if (activeTab == IDC_TAB_ACCOUNTS) {
 				PaintAccounts(hdc);
-			} else if (activeTab == IDC_TAB_ADD) {
+			} else if (activeTab == IDC_TAB_ADD || activeTab == IDC_TAB_EDIT) {
 				PaintAddTab(hdc);
 			}
 
