@@ -19,6 +19,9 @@ use std::io::Write;
 static ACCOUNTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
     Mutex::new(vec![])
 });
+static SCAN_RESULTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
+    Mutex::new(vec![])
+});
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 enum Algorithm {
@@ -70,6 +73,7 @@ enum TotpError {
     FileWriteError = 12,
     AccountNotFound = 13,
     ImageTooLarge = 14,
+    IndexOutOfRange = 15,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -410,15 +414,15 @@ fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<Stri
 
 
 #[no_mangle]
-pub extern "C" fn get_account(index: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> u32 {
-    result_to_error_code(get_account_inner(index, name, name_len, code, code_len, algorithm, digits, period))
+pub extern "C" fn get_account(index: u32, from_scan_results: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> u32 {
+    result_to_error_code(get_account_inner(index, from_scan_results, name, name_len, code, code_len, algorithm, digits, period))
 }
 
-fn get_account_inner(index: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> Result<(), Box<dyn Error>> {
+fn get_account_inner(index: u32, from_scan_results: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> Result<(), Box<dyn Error>> {
     let name = unsafe { ::std::slice::from_raw_parts_mut(name, name_len.try_into()?) };
     let code = unsafe { ::std::slice::from_raw_parts_mut(code, code_len.try_into()?) };
     
-    let mut accounts = ACCOUNTS.lock()?;
+    let mut accounts = if from_scan_results==0 { ACCOUNTS.lock()? } else { SCAN_RESULTS.lock()? };
     let account = get_account_by_index(&mut accounts, index)?;
     
     write_to_buffer(name, account.name.as_str())?;
@@ -438,26 +442,44 @@ pub extern "C" fn scan(brightness: *const u8, width: u32, height: u32) -> u32 {
     result_to_error_code(scan_inner(brightness, width, height))
 }
 
+
+
+
 fn scan_inner(brightness: *const u8, width: u32, height: u32) -> Result<(), Box<dyn Error>> {
     let width: usize = width.try_into()?;
     let height: usize = height.try_into()?;
     let byte_count = width.checked_mul(height).ok_or(TotpError::ImageTooLarge)?;
-    let brightness = unsafe { ::std::slice::from_raw_parts(brightness, byte_count) };
+    let brightness: &[u8] = unsafe { ::std::slice::from_raw_parts(brightness, byte_count) };
 
+    let mut scan_results = Vec::new();
+    
     // create a decoder
     let mut decoder = quircs::Quirc::default();
 
     // identify all qr codes
-    let codes = decoder.identify(width as usize, height as usize, &brightness);
+    let codes = decoder.identify(width, height, brightness);
 
     for code in codes {
         if let Ok(extracted_code) = code {
             if let Ok(decoded) = extracted_code.decode() {
-                println!("qrcode: {}", std::str::from_utf8(&decoded.payload).unwrap());
+                if let Ok(account) = Account::from_url(std::str::from_utf8(&decoded.payload).unwrap()) {
+                    scan_results.push(account);
+                }
             }
         }
     }
+    
+    let mut scan_results_global = SCAN_RESULTS.lock()?;
+    *scan_results_global = scan_results;
+    
     Ok( () )
+}
+
+#[no_mangle]
+pub extern "C" fn scan_result_count() -> u32 {
+    SCAN_RESULTS.lock().map_err(|_| ()).and_then(|scan_results| {
+        scan_results.len().try_into().map_err(|_| ())
+    }).unwrap_or(0)
 }
 
 #[no_mangle]
@@ -536,6 +558,7 @@ fn edit_account_inner(index: u32, name: *const u8, code: *const u8, algorithm: u
     Ok( () )
 }
 
+
 #[test]
 fn otpauth_example() {
     let account = Account::from_url("otpauth://totp/ACME%20CoFromPath:john.doe@email.com?secret=JBSWY3DPEHPK3PXP&issuer=ACME%20Co&algorithm=SHA1&digits=8&period=15").unwrap();
@@ -563,13 +586,13 @@ fn get_account_name_test() {
     panic!();
 }
 */
-
+/*
 #[test]
 fn add_account_test() {
     
-    assert_eq!(add_account(b"Ninja\0".as_ptr(), b"BSAPF2T4OEVIAB2D".as_ptr(), 1, 6, 30), 0);
+    assert_eq!(add_account(b"Ninja\0".as_ptr(), b"BSAPF3T4OEVIAB2D".as_ptr(), 1, 6, 30), 0);
     panic!();
-}
+}*/
 
 #[test]
 fn load_account_test() {
@@ -586,7 +609,7 @@ fn load_account_test() {
     
     println!("{:?}", &ACCOUNTS.lock().unwrap());
     
-    assert_eq!(delete_account(2), 0);
+    //assert_eq!(delete_account(2), 0);
     //assert_eq!(edit_account(2, name_buf.as_ptr(), code_buf.as_ptr(), 256, 15, 10), 0);
     
     panic!();

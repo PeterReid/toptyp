@@ -24,6 +24,9 @@
 #define IDC_TAB_EDIT		118
 #define IDC_SAVE 118
 #define IDC_SCAN 119
+#define IDM_EXPORT				120
+#define IDM_IMPORT				121
+
 #define IDC_MYICON				2
 #ifndef IDC_STATIC
 #define IDC_STATIC				-1

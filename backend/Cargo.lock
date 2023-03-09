@@ -197,8 +197,7 @@ dependencies = [
 [[package]]
 name = "quircs"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "088cd18eb88277186050867dbfc7079eba83a753e4bc2b51c0feef6908679f4a"
+source = "git+https://github.com/PeterReid/quircs#c36f73754e1ede1736ad2d7f4fae80db073eb735"
 dependencies = [
  "num-derive",
  "num-traits",

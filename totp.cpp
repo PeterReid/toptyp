@@ -42,9 +42,12 @@ extern "C" {
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
 	uint32_t delete_account(uint32_t index);
-	uint32_t get_account(uint32_t index, uint8_t *name, uint32_t name_len, uint8_t *code, uint32_t code_len, uint32_t *algorithm, uint32_t *digits, uint32_t *period);
+	uint32_t get_account(uint32_t index, uint32_t from_scan_results, uint8_t *name, uint32_t name_len, uint8_t *code, uint32_t code_len, uint32_t *algorithm, uint32_t *digits, uint32_t *period);
 	uint32_t edit_account(uint32_t index, uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
 	uint32_t scan(uint8_t *brightness, uint32_t width, uint32_t height);
+	uint32_t scan_result_count();
+	//uint32_t get_scan_result_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
+	uint32_t add_scan_result(uint32_t index, uint8_t* name);
 }
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
@@ -828,7 +831,7 @@ void InitAddTab()
 	}
 }
 
-void ShowAdvancedAddOptions(uint32_t algorithm, uint32_t digits, uint32_t period) {
+void ShowAdvancedAddOptions(uint32_t algorithm, uint32_t digits, uint32_t period, DWORD buttonFlags) {
 	DestroyWindow(addAccountTab.advancedButton);
 	addAccountTab.advancedButton = NULL;
 	RECT mainRect;
@@ -883,7 +886,7 @@ void ShowAdvancedAddOptions(uint32_t algorithm, uint32_t digits, uint32_t period
 			radioArea.right = margin + (mainRect.right - margin - margin) * (i+1) / 3;
 
 			TabParam tabParam = wnds[buttonSet][i];
-			*tabParam.wnd = CreateWindow(_T("BUTTON"), tabParam.text, WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
+			*tabParam.wnd = CreateWindow(_T("BUTTON"), tabParam.text, buttonFlags|WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
 			SetWindowSubclass(*tabParam.wnd, RadioButtonProc, 0, 0);
 		}
 	}
@@ -982,6 +985,7 @@ void SaveAccount()
 struct {
 	HWND instructions;
 	HWND scan;
+	HWND status;
 } scanTab;
 
 void InitScanTab()
@@ -1002,12 +1006,20 @@ void InitScanTab()
 	scanTab.scan = CreateWindow(_T("BUTTON"), L"Scan", WS_VISIBLE|WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, margin, scanButtonTop, mainRect.right-margin*2, sizeBasis*5/2, mainWnd, (HMENU)IDC_SCAN, NULL, NULL);
 	SetWindowSubclass(scanTab.scan, SaveButtonProc, 0, 0);
 
+	int statusTop = scanButtonTop + textBoxHeight + margin * 2;
+	scanTab.status = CreateWindowW(L"STATIC", L"", WS_CHILD | WS_VISIBLE,
+		margin,
+		statusTop,
+		mainRect.right - margin * 2,
+		textBoxHeight * 2, mainWnd, (HMENU)NULL, hInst, 0);
+	SetWindowSubclass(scanTab.status, StaticLabelProc, 0, 0);
+
 }
 
 void DestroyScanTab()
 {
 	HWND wnds[] = {
-		scanTab.instructions, scanTab.scan
+		scanTab.instructions, scanTab.scan, scanTab.status
 	};
 	for (size_t i=0; i<sizeof(wnds)/sizeof(HWND); i++) {
 		DestroyWindow(wnds[i]);
@@ -1112,7 +1124,7 @@ HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF o
 			} else if (distanceSq >= distanceMax) {
 				pixelColor = outside;
 			} else {
-				float distance = sqrt((float)distanceSq);
+				float distance = (float)sqrt((float)distanceSq);
 				float distanceWrongness = distance - curveMiddle;
 
 				if (distanceWrongness > 0) {
@@ -1465,7 +1477,7 @@ void CopyAsciiToClipboard(const char *ascii)
 	CloseClipboard();
 }
 
-void EditAccount(int idx)
+void EditAccount(int idx, bool fromScanResults)
 {
 	uint8_t nameUtf8[256];
 	uint8_t codeUtf8[256];
@@ -1473,7 +1485,7 @@ void EditAccount(int idx)
 	WCHAR codeBuf[256];
 
 	uint32_t algorithm, digits, period;
-	if (get_account(idx, nameUtf8, sizeof(nameUtf8), codeUtf8, sizeof(codeUtf8), &algorithm, &digits, &period)) {
+	if (get_account(idx, (uint32_t)fromScanResults, nameUtf8, sizeof(nameUtf8), codeUtf8, sizeof(codeUtf8), &algorithm, &digits, &period)) {
 		MessageBox(mainWnd, L"Failed to load account details", L"Error", MB_ICONERROR);
 		return;
 	}
@@ -1481,13 +1493,21 @@ void EditAccount(int idx)
 	MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (const char *)nameUtf8, sizeof(nameUtf8)/sizeof(*nameUtf8), nameBuf, sizeof(nameBuf)/sizeof(*nameBuf));
 	MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (const char *)codeUtf8, sizeof(codeUtf8)/sizeof(*codeUtf8), codeBuf, sizeof(codeBuf)/sizeof(*codeBuf));
 
-	SetActiveTab(IDC_TAB_EDIT, false);
+	SetActiveTab(fromScanResults ? IDC_TAB_ADD : IDC_TAB_EDIT, false);
 
 	SetHintingEditText(addAccountTab.nameEdit, nameBuf);
 	SetHintingEditText(addAccountTab.codeEdit, codeBuf);
+	if (fromScanResults) {
+		SendMessage(addAccountTab.codeEdit, EM_SETREADONLY, TRUE, 0);
+	}
 
 	if (algorithm != 1 || digits != 6 || period != 30) {
-		ShowAdvancedAddOptions(algorithm, digits, period);
+		ShowAdvancedAddOptions(algorithm, digits, period, fromScanResults ? WS_DISABLED : 0);
+	} else {
+		if (fromScanResults) {
+			DestroyWindow(addAccountTab.advancedButton);
+			addAccountTab.advancedButton = NULL;
+		}
 	}
 	InvalidateAboveToolbar();
 	ShowCreatedAddControls();
@@ -1506,18 +1526,80 @@ void RunScan()
 {
 	HDC hScreenDC = GetDC(nullptr); // CreateDC("DISPLAY",nullptr,nullptr,nullptr);
 	HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
-	int width = GetDeviceCaps(hScreenDC,HORZRES);
-	int height = GetDeviceCaps(hScreenDC,VERTRES);
+	int width = GetDeviceCaps(hScreenDC, HORZRES);
+	int height = GetDeviceCaps(hScreenDC, VERTRES);
 	HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC,width,height);
 	HBITMAP hOldBitmap = static_cast<HBITMAP>(SelectObject(hMemoryDC,hBitmap));
-	BitBlt(hMemoryDC,0,0,width,height,hScreenDC,0,0,SRCCOPY);
+
+	SelectObject(hMemoryDC, hBitmap);
+	BitBlt(hMemoryDC,0,0,width,height,hScreenDC,0,0,SRCCOPY|CAPTUREBLT);
+	COLORREF s = GetPixel(hScreenDC, 0, 0);
+	COLORREF b = GetPixel(hMemoryDC, 0, 0);
+
+	BITMAPINFO info = {0};
+	info.bmiHeader.biSize = sizeof(info.bmiHeader);
+	GetDIBits(hMemoryDC, hBitmap, 0, height, NULL, &info, DIB_RGB_COLORS);
+	int pixels = info.bmiHeader.biWidth * info.bmiHeader.biHeight;
+	if (info.bmiHeader.biBitCount != 32 || pixels*4 != info.bmiHeader.biSizeImage) {
+		return;
+	}
+	
+	uint32_t* rgbs = (uint32_t*)GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, info.bmiHeader.biSizeImage);
+	uint8_t *grays = (uint8_t *)GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, pixels);
+	if (!rgbs || !grays) {
+		// TODO: Nice error message
+		GlobalFree(rgbs);
+		GlobalFree(grays);
+		return;
+	}
+
+	info.bmiHeader.biCompression = BI_RGB;
+	int dibitsrets = GetDIBits(hMemoryDC, hBitmap, 0, info.bmiHeader.biHeight, rgbs, &info, DIB_RGB_COLORS);
+	
+	for (int y = 0; y<height; y++) {
+		for (int x = 0; x < width; x++) {
+			uint32_t rgb = rgbs[x + (height - y - 1) * width];
+			grays[x + y*width] = ((rgb & 0xff) + ((rgb >> 8) & 0xff) + ((rgb >> 16) & 0xff)) / 3;
+		}
+	}
+	scan(grays, info.bmiHeader.biWidth, info.bmiHeader.biHeight);
+	
 	hBitmap = static_cast<HBITMAP>(SelectObject(hMemoryDC,hOldBitmap));
 	DeleteDC(hMemoryDC);
 	DeleteDC(hScreenDC);
+	GlobalFree(rgbs);
+	GlobalFree(grays);
 
 
 
 	DeleteObject(hBitmap);
+
+	uint32_t results = scan_result_count();
+
+	if (results == 1) {
+		EditAccount(0, true);
+	}
+
+	WCHAR status[256];
+	if (results == 0) {
+		wcscpy_s(status, L"No QR codes found.");
+	} else {
+		swprintf_s(status, L"Account %d of %d:", (int)1, (int)results);
+	}
+	SetWindowTextW(scanTab.status, status);
+	InvalidateRect(scanTab.status, NULL, FALSE);
+
+	if (results == 1) {
+		EditAccount(0, true);
+	}
+	/*
+	if (results) {
+		uint8_t name[256];
+		get_scan_result_name(0, name, sizeof(name));
+		strcat((char*)name, "!");
+		add_scan_result(0, name);
+	}*/
+	
 }
 
 //
@@ -1585,12 +1667,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			SetActiveTab(wmId, true);
 			break;
 		case IDC_ADVANCED:
-			ShowAdvancedAddOptions(1, 6, 30);
+			ShowAdvancedAddOptions(1, 6, 30, 0);
 			ShowCreatedAddControls();
 			break;
 		case IDC_SAVE:
 			SaveAccount();
 			break;
+		case IDC_SCAN:
+			RunScan();
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
@@ -1726,7 +1810,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				::GetCursorPos(&cursor);
 				int ret = TrackPopupMenu(menu, TPM_RETURNCMD|TPM_NONOTIFY, cursor.x, cursor.y, 0, mainWnd, NULL);
 				if (ret == 1) {
-					EditAccount(clickedItem);
+					EditAccount(clickedItem, false);
 				} else if (ret == 2) {
 					WCHAR deleteMessageBuf[512] = L"Are you sure you want to delete ";
 					wcscat_s(deleteMessageBuf, accountNameBuf);
@@ -1756,6 +1840,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_MOUSELEAVE:
 		SetSelectedItem(-1);
 		trackingMouseLeave = false;
+		break;
+	case WM_CTLCOLORSTATIC:
+		SetBkColor((HDC)wParam, RGB(255, 255, 255));
 		break;
 	case WM_DESTROY:
 		PostQuitMessage(0);
