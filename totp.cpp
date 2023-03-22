@@ -943,10 +943,21 @@ void DestroyAddTab()
 		addAccountTab.period15, addAccountTab.period30, addAccountTab.period60,
 		addAccountTab.labels[0], addAccountTab.labels[1], addAccountTab.labels[2], addAccountTab.labels[3], addAccountTab.labels[4]
 	};
-	for (size_t i=0; i<sizeof(wnds)/sizeof(HWND); i++) {
-		DestroyWindow(wnds[i]);
+	size_t wndCount = sizeof(wnds) / sizeof(HWND);
+	HDWP defer  = BeginDeferWindowPos((int)wndCount);
+	for (size_t i = 0; i < wndCount; i++) {
+		if (wnds[i]) {
+			DeferWindowPos(defer, wnds[i], NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOREPOSITION | SWP_NOZORDER | SWP_NOSIZE | SWP_HIDEWINDOW);
+		}
 	}
+	EndDeferWindowPos(defer);
 
+	for (size_t i=0; i<wndCount; i++) {
+		if (wnds[i]) {
+			DestroyWindow(wnds[i]);
+		}
+	}
+	
 	ZeroMemory(&addAccountTab, sizeof(addAccountTab));
 }
 void SaveAccount()
@@ -1834,15 +1845,17 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			if (hintingEditData && hintingEditData->showingHint) {
 				SetTextColor(hdc, RGB(200,200,200));
 			}
+			SetBkColor((HDC)wParam, RGB(255, 255, 255));
 			return ret;
 		}
+		break;
+	case WM_CTLCOLORSTATIC:
+		// Forcing white background here avoids having the read-only text fields look odd with a gray center and white trim.
+		SetBkColor((HDC)wParam, RGB(255, 255, 255));
 		break;
 	case WM_MOUSELEAVE:
 		SetSelectedItem(-1);
 		trackingMouseLeave = false;
-		break;
-	case WM_CTLCOLORSTATIC:
-		SetBkColor((HDC)wParam, RGB(255, 255, 255));
 		break;
 	case WM_DESTROY:
 		PostQuitMessage(0);
