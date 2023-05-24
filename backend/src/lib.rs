@@ -3,7 +3,7 @@
 
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::io::Read;
 use std::time::SystemTime;
@@ -15,6 +15,16 @@ use std::ffi::CStr;
 use totp_lite::totp_custom;
 use std::fs::{OpenOptions, remove_file, rename};
 use std::io::Write;
+use std::ops::DerefMut;
+use std::collections::HashSet;
+
+use argon2::Argon2;
+use argon2::password_hash::rand_core::RngCore;
+
+use chacha20poly1305::{
+    aead::{Aead, AeadCore, KeyInit, OsRng},
+    ChaCha20Poly1305
+};
 
 static ACCOUNTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
     Mutex::new(vec![])
@@ -57,7 +67,7 @@ struct Account {
     digits: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 enum TotpError {
     MalformedUrl = 1,
     UnsupportedCodeType = 2,
@@ -74,6 +84,16 @@ enum TotpError {
     AccountNotFound = 13,
     ImageTooLarge = 14,
     IndexOutOfRange = 15,
+    FileReadError = 16,
+    UnsupportedPassword = 17,
+    InvalidImportContents = 18,
+    PasswordNeededForImport = 19,
+    EditInProgress = 20,
+    MalformedFileText = 21,
+    DecryptFailed = 22,
+    UndersizedBuffer = 23,
+    UnsupportedBufferSize = 24,
+    InternalError = 25,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -196,11 +216,11 @@ impl Account {
     }
 }
 
-fn write_to_buffer(dest: &mut [u8], value: &str) -> Result<(), Box<dyn Error>> {
+fn write_to_buffer(dest: &mut [u8], value: &str) -> Result<(), TotpError> {
     let value_bytes = value.as_bytes();
     
     if value_bytes.len()+1 > dest.len() {
-        Err(format!("Not enough space to write into a buffer"))?;
+        return Err(TotpError::UndersizedBuffer);
     }
     
     dest[..value_bytes.len()].copy_from_slice(value_bytes);
@@ -219,37 +239,36 @@ pub extern "C" fn load_accounts() -> u32 {
     result_to_error_code(load_accounts_inner())
 }
 
-fn get_save_file() -> Result<PathBuf, Box<dyn Error>> {
+fn get_save_file() -> PathBuf {
     let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
     dir.push("totp.txt");
-    Ok(dir)
+    dir
 }
-fn get_save_temp_file() -> Result<PathBuf, Box<dyn Error>> {
+fn get_save_temp_file() -> PathBuf {
     let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
     dir.push("totp.txt.temp");
-    Ok(dir)
+    dir
 }
 
-fn load_accounts_inner() -> Result<(), Box<dyn Error>> {
-    let dir = get_save_file()?;
-    println!("{:?}", dir);
-    let mut data = Vec::new();
-    File::open(&dir)?.read_to_end(&mut data)?;
-    
-    let mut accounts = ACCOUNTS.lock()?;
-    accounts.clear();
-    
-    let data = String::from_utf8(data)?;
-    for line in data.lines() {
+fn text_to_accounts(text: &str) -> Result<Vec<Account>, TotpError> {
+    let mut accounts = Vec::new();
+    for line in text.lines() {
         let line = line.trim();
         if line == "" {
             continue;
         }
         
         let account = Account::from_url(line)?;
-        (&mut accounts).push(account);
+        accounts.push(account);
     }
-    
+    Ok(accounts)
+}
+
+fn load_accounts_inner() -> Result<(), TotpError> {
+    // TODO: Also try temp path
+    let data = file_to_string(&get_save_file())?;
+    let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
+    *accounts.deref_mut() = text_to_accounts(&data)?;
     Ok( () )
 }
 
@@ -259,11 +278,10 @@ pub extern "C" fn accounts_len() -> u32 {
     ACCOUNTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
 }
 
-fn result_to_error_code<E: std::fmt::Debug>(r: Result<(), E>) -> u32 {
-    if r.is_ok() {
-        0
-    } else {
-        1
+fn result_to_error_code(r: Result<(), TotpError>) -> u32 {
+    match r {
+        Ok( () ) => 0,
+        Err( e ) => e as u32
     }
 }
 
@@ -272,19 +290,19 @@ pub extern "C" fn get_account_name(index: u32, dest: *mut u8, dest_len: u32) -> 
     result_to_error_code(get_account_name_inner(index, dest, dest_len))
 }
 
-fn get_account_by_index(accounts: &mut Vec<Account>, index: u32) -> Result<&mut Account, Box<dyn Error>> {
-    let index: usize = index.try_into()?;
+fn get_account_by_index(accounts: &mut Vec<Account>, index: u32) -> Result<&mut Account, TotpError> {
+    let index: usize = index.try_into().map_err(|_| TotpError::IndexOutOfRange)?;
     if index >= accounts.len() {
-        Err(format!("Account index out of range (index {} with length {})", index, accounts.len()))?;
+        Err(TotpError::IndexOutOfRange)?;
     }
     Ok(&mut accounts[index])
 }
 
-fn get_account_name_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<(), Box<dyn Error>> {
-    let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into()?) };
+fn get_account_name_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<(), TotpError> {
+    let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
     empty_string_into_buffer(dest);
     
-    let mut accounts = ACCOUNTS.lock()?;
+    let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
     let account = get_account_by_index(&mut accounts, index)?;
     
     write_to_buffer(dest, account.name.as_str())?;
@@ -296,14 +314,14 @@ pub extern "C" fn get_code(index: u32, dest: *mut u8, dest_len: u32, millis_per_
     result_to_error_code(get_code_inner(index, dest, dest_len, millis_per_code, millis_into_code))
 }
 
-fn get_code_inner(index: u32, dest: *mut u8, dest_len: u32, millis_per_code: *mut u32, millis_into_code: *mut u32) -> Result<(), Box<dyn Error>> {
-    let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into()?) };
+fn get_code_inner(index: u32, dest: *mut u8, dest_len: u32, millis_per_code: *mut u32, millis_into_code: *mut u32) -> Result<(), TotpError> {
+    let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
     empty_string_into_buffer(dest);
     
-    let mut accounts = ACCOUNTS.lock()?;
+    let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
     let account = get_account_by_index(&mut accounts, index)?;
     
-    let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH)?;
+    let since_epoch = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|_| TotpError::InternalError)?;
     let seconds: u64 = since_epoch.as_secs();
     let code = match account.algorithm {
         Algorithm::Sha1 => totp_custom::<totp_lite::Sha1>(account.period, account.digits, &account.secret, seconds),
@@ -326,7 +344,7 @@ pub extern "C" fn add_account(name: *const u8, code: *const u8, algorithm: u32, 
     result_to_error_code(add_account_inner(name, code, algorithm, digits, period))
 }
 
-fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), Box<dyn Error>> {
+fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), TotpError> {
     let name_str = unsafe { CStr::from_ptr(name as *const i8) };
     let code_str = unsafe { CStr::from_ptr(code as *const i8) };
     
@@ -366,11 +384,11 @@ fn find_account_index(account: &Account, expected_at_line: u32, lines: &[String]
     best_line_idx
 }
 
-fn delete_account_inner(index: u32) -> Result<(), Box<dyn Error>> {
+fn delete_account_inner(index: u32) -> Result<(), TotpError> {
     // We know exactly what account we want to delete in the in-memory ACCOUNTS, but there
     // is no guarantee that the file has not changed from under us.
     {
-        let mut accounts = ACCOUNTS.lock()?;
+        let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
         let target_account = get_account_by_index(&mut accounts, index)?;
         
         atomic_file_modification(&|mut data: Vec<String>| {
@@ -388,26 +406,36 @@ fn delete_account_inner(index: u32) -> Result<(), Box<dyn Error>> {
     Ok( () )
 }
 
-fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<String>, TotpError>) -> Result<(), Box<dyn Error>> {
-    let temp_file_path = get_save_temp_file()?;
-    let data_file_path = get_save_file()?;
+fn file_to_string(path: &Path) -> Result<String, TotpError> {
+    // TODO: Enforce a reasonable size limit, so we don't hang in the case of a many-GB file
+    let mut data_bytes = Vec::new();
+    if path.exists() {
+        File::open(&path).and_then(|mut f| f.read_to_end(&mut data_bytes)).map_err(|_| TotpError::FileReadError)?;
+    }
+    String::from_utf8(data_bytes).map_err(|_| TotpError::MalformedFileText)
+}
+
+fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<String>, TotpError>) -> Result<(), TotpError> {
+    let temp_file_path = get_save_temp_file();
+    let data_file_path = get_save_file();
     
     if temp_file_path.exists() {
-        remove_file(&temp_file_path)?; // If this doesn't get removed, we have another instance actively working on the file. That is very strange, so report the errot to user.
+        if data_file_path.exists() {
+            // A previous atomic file modification must have be interrupted.
+            rename(&data_file_path, &temp_file_path).map_err(|_| TotpError::EditInProgress)?;
+        } else {
+            remove_file(&temp_file_path).map_err(|_| TotpError::EditInProgress)?; // If this doesn't get removed, we have another instance actively working on the file. That is very strange, so report the errot to user.
+        }
     }
     
-    let mut temp_file = OpenOptions::new().write(true).create_new(true).open(&temp_file_path)?;
-    let mut old_data_bytes = Vec::new();
-    if data_file_path.exists() {
-        File::open(&data_file_path)?.read_to_end(&mut old_data_bytes)?;
-    }
-    let old_data = String::from_utf8(old_data_bytes)?;
+    let mut temp_file = OpenOptions::new().write(true).create_new(true).open(&temp_file_path).map_err(|_| TotpError::FileWriteError)?;
+    let old_data = file_to_string(&data_file_path)?;
     let old_data_lines: Vec<String> = old_data.lines().map(|line| line.trim()).filter(|line| line.len()>0).map(|s| s.to_string()).collect();
     let new_data_lines = modify_data(old_data_lines)?;
     let new_data = new_data_lines.join("\r\n");
-    temp_file.write_all(new_data.as_bytes())?;
+    temp_file.write_all(new_data.as_bytes()).map_err(|_| TotpError::FileWriteError)?;
     drop(temp_file);
-    rename(temp_file_path, data_file_path)?;
+    rename(temp_file_path, data_file_path).map_err(|_| TotpError::FileWriteError)?;
     
     Ok( () )
 }
@@ -418,11 +446,11 @@ pub extern "C" fn get_account(index: u32, from_scan_results: u32, name: *mut u8,
     result_to_error_code(get_account_inner(index, from_scan_results, name, name_len, code, code_len, algorithm, digits, period))
 }
 
-fn get_account_inner(index: u32, from_scan_results: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> Result<(), Box<dyn Error>> {
-    let name = unsafe { ::std::slice::from_raw_parts_mut(name, name_len.try_into()?) };
-    let code = unsafe { ::std::slice::from_raw_parts_mut(code, code_len.try_into()?) };
+fn get_account_inner(index: u32, from_scan_results: u32, name: *mut u8, name_len: u32, code: *mut u8, code_len: u32, algorithm: *mut u32, digits: *mut u32, period: *mut u32) -> Result<(), TotpError> {
+    let name = unsafe { ::std::slice::from_raw_parts_mut(name, name_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
+    let code = unsafe { ::std::slice::from_raw_parts_mut(code, code_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
     
-    let mut accounts = if from_scan_results==0 { ACCOUNTS.lock()? } else { SCAN_RESULTS.lock()? };
+    let mut accounts = (if from_scan_results==0 { ACCOUNTS.lock() } else { SCAN_RESULTS.lock() }).map_err(|_| TotpError::InternalError)?;
     let account = get_account_by_index(&mut accounts, index)?;
     
     write_to_buffer(name, account.name.as_str())?;
@@ -445,9 +473,9 @@ pub extern "C" fn scan(brightness: *const u8, width: u32, height: u32) -> u32 {
 
 
 
-fn scan_inner(brightness: *const u8, width: u32, height: u32) -> Result<(), Box<dyn Error>> {
-    let width: usize = width.try_into()?;
-    let height: usize = height.try_into()?;
+fn scan_inner(brightness: *const u8, width: u32, height: u32) -> Result<(), TotpError> {
+    let width: usize = width.try_into().map_err(|_| TotpError::ImageTooLarge)?;
+    let height: usize = height.try_into().map_err(|_| TotpError::ImageTooLarge)?;
     let byte_count = width.checked_mul(height).ok_or(TotpError::ImageTooLarge)?;
     let brightness: &[u8] = unsafe { ::std::slice::from_raw_parts(brightness, byte_count) };
 
@@ -469,7 +497,7 @@ fn scan_inner(brightness: *const u8, width: u32, height: u32) -> Result<(), Box<
         }
     }
     
-    let mut scan_results_global = SCAN_RESULTS.lock()?;
+    let mut scan_results_global = SCAN_RESULTS.lock().map_err(|_| TotpError::InternalError)?;
     *scan_results_global = scan_results;
     
     Ok( () )
@@ -487,12 +515,12 @@ pub extern "C" fn edit_account(index: u32, name: *const u8, code: *const u8, alg
     result_to_error_code(edit_account_inner(index, name, code, algorithm, digits, period))
 }
 
-fn edit_account_inner(index: u32, name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), Box<dyn Error>> {
+fn edit_account_inner(index: u32, name: *const u8, code: *const u8, algorithm: u32, digits: u32, period: u32) -> Result<(), TotpError> {
     {
         let name_str = unsafe { CStr::from_ptr(name as *const i8) };
         let code_str = unsafe { CStr::from_ptr(code as *const i8) };
 
-        let mut accounts = ACCOUNTS.lock()?;
+        let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
         let target_currently_is = get_account_by_index(&mut accounts, index)?;
         
         let target_will_be = Account::from_c_params(name_str, code_str, algorithm, digits, period)?;
@@ -558,6 +586,187 @@ fn edit_account_inner(index: u32, name: *const u8, code: *const u8, algorithm: u
     Ok( () )
 }
 
+use std::ffi::OsString;
+
+#[cfg(target_os = "windows")]
+unsafe fn u16s_to_osstring(data: *const u16) -> OsString {
+    use std::os::windows::ffi::OsStringExt;
+
+    let mut len = 0usize;
+    while *data.offset(len as isize) != 0 {
+        len += 1;
+    }
+    let data_slice: &[u16] = unsafe { ::std::slice::from_raw_parts(data, len) };
+
+    OsString::from_wide(data_slice)
+}
+
+#[cfg(target_os = "windows")]
+#[no_mangle]
+pub extern "C" fn export_to_file_on_windows(path: *const u16) -> u32 {
+	let path = unsafe { u16s_to_osstring(path) };
+    result_to_error_code(export_to_file(path))
+}
+
+#[cfg(target_os = "windows")]
+#[no_mangle]
+pub extern "C" fn export_to_encrypted_file_on_windows(path: *const u16, password: *const u8) -> u32 {
+	let path = unsafe { u16s_to_osstring(path) };
+    result_to_error_code(export_to_encrypted_file(path, password))
+}
+
+fn export_to_file(path: OsString) -> Result<(), TotpError> {
+    let dir = get_save_file();
+    let mut data = Vec::new();
+    File::open(&dir).and_then(|mut f| f.read_to_end(&mut data)).map_err(|_| TotpError::FileReadError)?;
+    File::create(path).and_then(|mut f| f.write_all(&data)).map_err(|_| TotpError::FileWriteError)?;
+    Ok( () )
+}
+
+fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], TotpError> {
+    let mut output_key_material = [0u8; 32]; // Can be any desired size
+    Argon2::default().hash_password_into(password.as_bytes(), salt, &mut output_key_material).map_err(|_| TotpError::UnsupportedPassword)?;
+    Ok(output_key_material)
+}
+
+fn byte_encrypt(plaintext: &[u8], password: &str) -> Result<Vec<u8>, TotpError> {
+    let mut salt = [0u8; 16];
+    OsRng.fill_bytes(&mut salt);
+    
+    let key = derive_key(password, &salt[..])?.into();
+    let cipher = ChaCha20Poly1305::new(&key );
+    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng); // 96-bits; unique per message
+    let mut ciphertext = cipher.encrypt(&nonce, plaintext).unwrap();
+    ciphertext.extend(salt);
+    ciphertext.extend(nonce);
+    Ok(ciphertext)
+}
+
+fn chunkify_text(mut text: &str) -> String {
+    let mut result = String::new();
+    let mut chunk_index = 0;
+    while text.len() > 8 {
+        let (chunk, remaining_text) = text.split_at(8);
+        result.push_str(chunk);
+        result.push(if chunk_index%8==7 { '\n' } else { ' ' });
+        
+        chunk_index += 1;
+        text = remaining_text;
+    }
+    result.push_str(text);
+    result
+}
+
+fn string_encrypt(plaintext: &str, password: &str) -> Result<String, TotpError> {
+    let encrypted_data = byte_encrypt(plaintext.as_bytes(), password)?;
+    let encrypted_text = base32::encode(base32::Alphabet::RFC4648{padding: false}, &encrypted_data);
+    let encrypted_text_chunked = chunkify_text(&encrypted_text);
+    Ok(encrypted_text_chunked)
+}
+
+fn export_to_encrypted_file(path: OsString, password: *const u8) -> Result<(), TotpError> {
+    let password = unsafe { CStr::from_ptr(password as *const i8) };
+    let plaintext = file_to_string(&get_save_file())?;
+    let password = password.to_str().map_err(|_| TotpError::UnsupportedPassword)?;
+    let encrypted_text_chunked = string_encrypt(&plaintext, password)?;
+    File::create(path).and_then(|mut f| f.write_all(encrypted_text_chunked.as_bytes())).map_err(|_| TotpError::FileWriteError)?;
+    Ok( () )
+}
+
+#[cfg(target_os = "windows")]
+#[no_mangle]
+pub extern "C" fn import_on_windows(path: *const u16, password: *const u8) -> u32 {
+    let path = unsafe { u16s_to_osstring(path) };
+    result_to_error_code(import_inner(path, password))
+}
+
+fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
+    let mut base32_chars = String::new();
+    let mut consecutive_base32_chars = 0;
+    let mut ending = false;
+    for c in data.chars() {
+        if c.is_whitespace() {
+            if consecutive_base32_chars != 0 && consecutive_base32_chars != 8 {
+                // A group of characters that is not exactly 8 characters long had better be the end.
+                ending = true;
+            }
+            consecutive_base32_chars = 0;
+        } else if (c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7') {
+            if ending {
+                return None;
+            }
+            consecutive_base32_chars += 1;
+            if consecutive_base32_chars > 8 {
+                return None;
+            }
+            base32_chars.push(c);
+        }
+    }
+    
+    base32::decode(base32::Alphabet::RFC4648{padding: false}, &base32_chars)
+}
+
+fn import_text(plaintext: String) -> Result<(), TotpError> {
+    let imported_accounts = text_to_accounts(&plaintext)?;
+    atomic_file_modification(&|mut data: Vec<String>| {
+        let mut existings = HashSet::new();
+        for existing in data.iter() {
+            existings.insert(existing.clone());
+        }
+        
+        for imported_account in imported_accounts.iter() {
+            let imported_account_str = imported_account.to_url();
+            if !existings.contains(&imported_account_str) {
+                data.push(imported_account_str);
+            }
+        }
+        
+        Ok( data )
+    })?;
+
+    Ok( () )
+}
+
+fn decrypt(ciphertext: &[u8], password: &str) -> Result<String, TotpError> {
+    if ciphertext.len() < 12+16 {
+        return Err(TotpError::DecryptFailed);
+    }
+    let (ciphertext_body, salt_and_nonce) = ciphertext.split_at(ciphertext.len() - (12+16));
+    let (salt, nonce) = salt_and_nonce.split_at(16);
+    
+    let key = derive_key(password, salt)?.into();
+    let cipher = ChaCha20Poly1305::new(&key);
+    let plaintext = cipher.decrypt(nonce.into(), ciphertext_body).map_err(|_| TotpError::DecryptFailed)?;
+    String::from_utf8(plaintext).map_err(|_| TotpError::MalformedFileText)
+}
+
+fn import_inner(path: OsString, password: *const u8) -> Result<(), TotpError> {
+    let password = if password.is_null() { None } else { Some(unsafe { CStr::from_ptr(password as *const i8) }) };
+    let mut data = Vec::new();
+    File::open(&path).and_then(|mut f| f.read_to_end(&mut data)).map_err(|_| TotpError::FileReadError)?;
+    let data = String::from_utf8(data).map_err(|_| TotpError::InvalidImportContents)?;
+    
+    if let Some(ciphertext) = extract_ciphertext(&data) {
+        match password {
+            Some(password) => {
+                let plaintext: String = decrypt(&ciphertext, password.to_str().map_err(|_| TotpError::UnsupportedPassword)?)?;
+                import_text(plaintext)?;
+            }
+            None => { return Err(TotpError::PasswordNeededForImport); }
+        }
+    } else {
+        import_text(data)?;
+    }
+    
+    load_accounts_inner()?;
+    
+    Ok( () )
+    
+}
+
+
+
+
 
 #[test]
 fn otpauth_example() {
@@ -593,7 +802,7 @@ fn add_account_test() {
     assert_eq!(add_account(b"Ninja\0".as_ptr(), b"BSAPF3T4OEVIAB2D".as_ptr(), 1, 6, 30), 0);
     panic!();
 }*/
-
+/*
 #[test]
 fn load_account_test() {
     
@@ -614,5 +823,40 @@ fn load_account_test() {
     
     panic!();
     
+    
+}*/
+
+
+#[test]
+fn encryption_round_trip() {
+    let plaintext = "arbitrary plaintext".to_string();
+    let password = "the quick brown fox jumped over the lazy dog";
+    let ciphertext = string_encrypt(&plaintext, password).unwrap();
+    let ciphertext_bytes = extract_ciphertext(&ciphertext).unwrap();
+    let plaintext_again = decrypt(&ciphertext_bytes, password).unwrap();
+    assert_eq!(plaintext, plaintext_again);
+    
+    assert!(decrypt(&ciphertext_bytes, "wrong password").is_err());
+}
+
+#[test]
+fn import_test() {
+    match import_inner("C:\\Users\\Peter\\Documents\\encsecrets.txt".into(), std::ptr::null()) {
+        Err(TotpError::PasswordNeededForImport) => {
+            
+        }
+        _ => {
+            assert!(false);
+        }
+    }
+    
+    match import_inner("C:\\Users\\Peter\\Documents\\encsecrets.txt".into(), b"testpassword\0".as_ptr()) {
+        Ok( () ) => {
+            
+        }
+        Err(e) => {
+            panic!("failed import {}", e as u32);
+        }
+    }
     
 }

@@ -48,6 +48,9 @@ extern "C" {
 	uint32_t scan_result_count();
 	//uint32_t get_scan_result_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
 	uint32_t add_scan_result(uint32_t index, uint8_t* name);
+	uint32_t export_to_file_on_windows(uint16_t* path);
+	uint32_t export_to_encrypted_file_on_windows(uint16_t* path, uint8_t *password);
+	uint32_t import_on_windows(uint16_t* path, uint8_t* password);
 }
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius);
@@ -623,6 +626,13 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+void ReportError(uint32_t err, WCHAR* message)
+{
+	if (err) {
+		MessageBoxW(mainWnd, message, L"Error", MB_ICONERROR);
+	}
+}
+
 LRESULT CALLBACK StaticLabelProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                                LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
 {
@@ -1117,6 +1127,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 }
 
 #include <math.h>
+#include <commdlg.h>
 
 HBITMAP CreateRoundedCorner(HDC dc, COLORREF inside, COLORREF border, COLORREF outside, int radius) {
 	HDC dc2 = CreateCompatibleDC(dc);
@@ -1613,6 +1624,58 @@ void RunScan()
 	
 }
 
+bool GetFilePath(bool save, WCHAR szPath[MAX_PATH])
+{
+	OPENFILENAME ofn = { sizeof(ofn) };
+	ofn.hwndOwner = mainWnd;
+	ofn.lpstrFilter = L"Text Files\0*.txt\0All Files\0*.*\0";
+	ofn.lpstrFile = szPath;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.lpstrTitle = save ? L"Export As" : L"Import From";
+	ofn.lpstrDefExt = L"txt";
+	return !!(save ? GetSaveFileName(&ofn) : GetOpenFileName(&ofn));
+}
+
+void ExportUnencryptedToFile()
+{
+	WCHAR szPath[MAX_PATH];
+	if (!GetFilePath(true, szPath)) return;
+	ReportError(export_to_file_on_windows((uint16_t*)szPath), L"Export failed.");
+}
+
+void ExportEncryptedToFile()
+{
+	WCHAR szPath[MAX_PATH] = {};
+	if (!GetFilePath(true, szPath)) return;
+
+	WCHAR password[256] = L"testpassword";
+	uint8_t passwordUtf8[256];
+	WideCharToMultiByte(CP_UTF8, 0, password, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
+
+	ReportError(export_to_encrypted_file_on_windows((uint16_t*)szPath, passwordUtf8), L"Export failed.");
+}
+
+void ImportFromFile()
+{
+	WCHAR szPath[MAX_PATH] = {};
+	if (!GetFilePath(false, szPath)) return;
+
+
+	uint32_t err = import_on_windows((uint16_t*)szPath, NULL);
+	if (err == 0) {
+
+	}
+	else if (err == 19) {
+		MessageBox(mainWnd, L"Password", L"TODO: Password needed", MB_OK);
+		char password[1024] = "testpassword";
+		err = import_on_windows((uint16_t*)szPath, (uint8_t *)password);
+		ReportError(err, L"Import failed");
+	}
+	else {
+		ReportError(err, L"Import failed.");
+	}
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -1642,6 +1705,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_EXIT:
 			DestroyWindow(hWnd);
+			break;
+		case IDM_EXPORT_ENCRYPTED_TO_FILE:
+			ExportEncryptedToFile();
+			break;
+		case IDM_EXPORT_UNENCRYPTED_TO_FILE:
+			ExportUnencryptedToFile();
+			break;
+		case IDM_IMPORT_FROM_FILE:
+			ImportFromFile();
 			break;
 		case IDC_SEARCH:
 		case IDC_NAME:
