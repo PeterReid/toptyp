@@ -18,6 +18,8 @@ use std::io::Write;
 use std::ops::DerefMut;
 use std::collections::HashSet;
 
+use arboard::Clipboard;
+
 use argon2::Argon2;
 use argon2::password_hash::rand_core::RngCore;
 
@@ -673,11 +675,34 @@ fn export_to_encrypted_file(path: OsString, password: *const u8) -> Result<(), T
     Ok( () )
 }
 
+#[no_mangle]
+pub extern "C" fn export_unencrypted_to_clipboard() -> u32 {
+    result_to_error_code(export_to_clipboard_inner())
+}
+
+fn export_unencrypted_to_clipboard_inner() -> Result<(), TotpError> {
+    let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
+    let data = file_to_string(&get_save_file())?;
+    clipboard.set_text(data).map_err(|_| TotpError::InternalError)?;
+    Ok( () )
+}
+
 #[cfg(target_os = "windows")]
 #[no_mangle]
 pub extern "C" fn import_on_windows(path: *const u16, password: *const u8) -> u32 {
     let path = unsafe { u16s_to_osstring(path) };
     result_to_error_code(import_inner(path, password))
+}
+
+#[no_mangle]
+pub extern "C" fn import_from_clipboard() -> u32 {
+    result_to_error_code(import_from_clipboard_inner())
+}
+
+fn import_from_clipboard_inner() -> Result<(), TotpError> {
+    let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
+    let clipboard_contents = clipboard.get_text().map_err(|_| TotpError::InternalError)?;
+    import_text(clipboard_contents)
 }
 
 fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
