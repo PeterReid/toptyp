@@ -49,6 +49,9 @@ extern "C" {
 	//uint32_t get_scan_result_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
 	uint32_t add_scan_result(uint32_t index, uint8_t* name);
 	uint32_t export_to_file_on_windows(uint16_t* path);
+	uint32_t export_to_clipboard();
+	uint32_t export_encrypted_to_clipboard(uint8_t *password);
+	uint32_t import_from_clipboard(uint8_t *password);
 	uint32_t export_to_encrypted_file_on_windows(uint16_t* path, uint8_t *password);
 	uint32_t import_on_windows(uint16_t* path, uint8_t* password);
 }
@@ -1638,14 +1641,14 @@ bool GetFilePath(bool save, WCHAR szPath[MAX_PATH])
 
 void ExportUnencryptedToFile()
 {
-	WCHAR szPath[MAX_PATH];
+	WCHAR szPath[MAX_PATH] = L"";
 	if (!GetFilePath(true, szPath)) return;
 	ReportError(export_to_file_on_windows((uint16_t*)szPath), L"Export failed.");
 }
 
 void ExportEncryptedToFile()
 {
-	WCHAR szPath[MAX_PATH] = {};
+	WCHAR szPath[MAX_PATH] = L"";
 	if (!GetFilePath(true, szPath)) return;
 
 	WCHAR password[256] = L"testpassword";
@@ -1655,9 +1658,36 @@ void ExportEncryptedToFile()
 	ReportError(export_to_encrypted_file_on_windows((uint16_t*)szPath, passwordUtf8), L"Export failed.");
 }
 
+void ExportEncryptedToClipboard()
+{
+	WCHAR password[256] = L"testpassword";
+	uint8_t passwordUtf8[256];
+	WideCharToMultiByte(CP_UTF8, 0, password, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
+
+	ReportError(export_encrypted_to_clipboard(passwordUtf8), L"Export failed.");
+}
+
+void ImportFromClipboard()
+{
+	uint32_t err = import_from_clipboard(NULL);
+	if (err == 0) {
+
+	}
+	else if (err == 19) {
+		MessageBox(mainWnd, L"Password", L"TODO: Password needed", MB_OK);
+		char password[1024] = "testpassword";
+		err = import_from_clipboard((uint8_t*)password);
+		ReportError(err, L"Import failed");
+	}
+	else {
+		ReportError(err, L"Import failed");
+	}
+	InvalidateAboveToolbar();
+}
+
 void ImportFromFile()
 {
-	WCHAR szPath[MAX_PATH] = {};
+	WCHAR szPath[MAX_PATH] = L"";
 	if (!GetFilePath(false, szPath)) return;
 
 
@@ -1674,6 +1704,7 @@ void ImportFromFile()
 	else {
 		ReportError(err, L"Import failed.");
 	}
+	InvalidateAboveToolbar();
 }
 
 //
@@ -1711,6 +1742,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_EXPORT_UNENCRYPTED_TO_FILE:
 			ExportUnencryptedToFile();
+			break;
+		case IDM_EXPORT_UNENCRYPTED_TO_CLIPBOARD:
+			export_to_clipboard();
+			break;
+		case IDM_EXPORT_ENCRYPTED_TO_CLIPBOARD:
+			ExportEncryptedToClipboard();
+			break;
+		case IDM_IMPORT_FROM_CLIPBOARD:
+			ImportFromClipboard();
+			InvalidateAboveToolbar();
 			break;
 		case IDM_IMPORT_FROM_FILE:
 			ImportFromFile();

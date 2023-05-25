@@ -88,14 +88,13 @@ enum TotpError {
     IndexOutOfRange = 15,
     FileReadError = 16,
     UnsupportedPassword = 17,
-    InvalidImportContents = 18,
+    InternalError = 18,
     PasswordNeededForImport = 19,
     EditInProgress = 20,
     MalformedFileText = 21,
     DecryptFailed = 22,
     UndersizedBuffer = 23,
     UnsupportedBufferSize = 24,
-    InternalError = 25,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -666,24 +665,40 @@ fn string_encrypt(plaintext: &str, password: &str) -> Result<String, TotpError> 
     Ok(encrypted_text_chunked)
 }
 
-fn export_to_encrypted_file(path: OsString, password: *const u8) -> Result<(), TotpError> {
+fn encrypt_with_password(password: *const u8) -> Result<String, TotpError> {
     let password = unsafe { CStr::from_ptr(password as *const i8) };
     let plaintext = file_to_string(&get_save_file())?;
     let password = password.to_str().map_err(|_| TotpError::UnsupportedPassword)?;
-    let encrypted_text_chunked = string_encrypt(&plaintext, password)?;
-    File::create(path).and_then(|mut f| f.write_all(encrypted_text_chunked.as_bytes())).map_err(|_| TotpError::FileWriteError)?;
+    string_encrypt(&plaintext, password)
+}
+
+fn export_to_encrypted_file(path: OsString, password: *const u8) -> Result<(), TotpError> {
+    let encrypted_text = encrypt_with_password(password)?;
+    File::create(path).and_then(|mut f| f.write_all(encrypted_text.as_bytes())).map_err(|_| TotpError::FileWriteError)?;
     Ok( () )
 }
 
 #[no_mangle]
-pub extern "C" fn export_unencrypted_to_clipboard() -> u32 {
+pub extern "C" fn export_to_clipboard() -> u32 {
     result_to_error_code(export_to_clipboard_inner())
 }
 
-fn export_unencrypted_to_clipboard_inner() -> Result<(), TotpError> {
+fn export_to_clipboard_inner() -> Result<(), TotpError> {
     let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
     let data = file_to_string(&get_save_file())?;
     clipboard.set_text(data).map_err(|_| TotpError::InternalError)?;
+    Ok( () )
+}
+
+#[no_mangle]
+pub extern "C" fn export_encrypted_to_clipboard(password: *const u8) -> u32 {
+    result_to_error_code(export_encrypted_to_clipboard_inner(password))
+}
+
+fn export_encrypted_to_clipboard_inner(password: *const u8) -> Result<(), TotpError> {
+    let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
+    let encrypted_text = encrypt_with_password(password)?;
+    clipboard.set_text(encrypted_text).map_err(|_| TotpError::InternalError)?;
     Ok( () )
 }
 
@@ -695,14 +710,14 @@ pub extern "C" fn import_on_windows(path: *const u16, password: *const u8) -> u3
 }
 
 #[no_mangle]
-pub extern "C" fn import_from_clipboard() -> u32 {
-    result_to_error_code(import_from_clipboard_inner())
+pub extern "C" fn import_from_clipboard(password: *const u8) -> u32 {
+    result_to_error_code(import_from_clipboard_inner(password))
 }
 
-fn import_from_clipboard_inner() -> Result<(), TotpError> {
+fn import_from_clipboard_inner(password: *const u8) -> Result<(), TotpError> {
     let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
     let clipboard_contents = clipboard.get_text().map_err(|_| TotpError::InternalError)?;
-    import_text(clipboard_contents)
+    import_string(clipboard_contents, password)
 }
 
 fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
@@ -731,7 +746,7 @@ fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
     base32::decode(base32::Alphabet::RFC4648{padding: false}, &base32_chars)
 }
 
-fn import_text(plaintext: String) -> Result<(), TotpError> {
+fn import_plaintext(plaintext: String) -> Result<(), TotpError> {
     let imported_accounts = text_to_accounts(&plaintext)?;
     atomic_file_modification(&|mut data: Vec<String>| {
         let mut existings = HashSet::new();
@@ -749,6 +764,8 @@ fn import_text(plaintext: String) -> Result<(), TotpError> {
         Ok( data )
     })?;
 
+    load_accounts_inner()?;
+    
     Ok( () )
 }
 
@@ -766,24 +783,23 @@ fn decrypt(ciphertext: &[u8], password: &str) -> Result<String, TotpError> {
 }
 
 fn import_inner(path: OsString, password: *const u8) -> Result<(), TotpError> {
-    let password = if password.is_null() { None } else { Some(unsafe { CStr::from_ptr(password as *const i8) }) };
-    let mut data = Vec::new();
-    File::open(&path).and_then(|mut f| f.read_to_end(&mut data)).map_err(|_| TotpError::FileReadError)?;
-    let data = String::from_utf8(data).map_err(|_| TotpError::InvalidImportContents)?;
+    let data = file_to_string(&PathBuf::from(path))?;
+    import_string(data, password)
+}
     
+fn import_string(data: String, password: *const u8) -> Result<(), TotpError> {
+    let password = if password.is_null() { None } else { Some(unsafe { CStr::from_ptr(password as *const i8) }) };
     if let Some(ciphertext) = extract_ciphertext(&data) {
         match password {
             Some(password) => {
                 let plaintext: String = decrypt(&ciphertext, password.to_str().map_err(|_| TotpError::UnsupportedPassword)?)?;
-                import_text(plaintext)?;
+                import_plaintext(plaintext)?;
             }
             None => { return Err(TotpError::PasswordNeededForImport); }
         }
     } else {
-        import_text(data)?;
+        import_plaintext(data)?;
     }
-    
-    load_accounts_inner()?;
     
     Ok( () )
     
