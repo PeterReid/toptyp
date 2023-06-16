@@ -21,6 +21,7 @@ BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	SetPasswordDlg(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK	EnterPasswordDlg(HWND, UINT, WPARAM, LPARAM);
 
 HWND mainWnd = NULL;
 
@@ -1660,19 +1661,22 @@ void ExportEncryptedToFile()
 	WCHAR szPath[MAX_PATH] = L"";
 	if (!GetFilePath(true, szPath)) return;
 
-	uint8_t passwordUtf8[256];
+	uint8_t passwordUtf8[512];
 	WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
 
 	ReportError(export_to_encrypted_file_on_windows((uint16_t*)szPath, passwordUtf8), L"Export failed.");
+	ZeroMemory(passwordWindowBuf, sizeof(passwordWindowBuf));
 }
 
 void ExportEncryptedToClipboard()
 {
-	WCHAR password[256] = L"testpassword";
-	uint8_t passwordUtf8[256];
-	WideCharToMultiByte(CP_UTF8, 0, password, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
+	if (DialogBox(hInst, MAKEINTRESOURCE(IDD_SET_PASSWORD), mainWnd, SetPasswordDlg) != IDOK) return;
+
+	uint8_t passwordUtf8[512];
+	WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
 
 	ReportError(export_encrypted_to_clipboard(passwordUtf8), L"Export failed.");
+	ZeroMemory(passwordWindowBuf, sizeof(passwordWindowBuf));
 }
 
 void ImportFromClipboard()
@@ -1682,9 +1686,11 @@ void ImportFromClipboard()
 
 	}
 	else if (err == 19) {
-		MessageBox(mainWnd, L"Password", L"TODO: Password needed", MB_OK);
-		char password[1024] = "testpassword";
-		err = import_from_clipboard((uint8_t*)password);
+		if (DialogBox(hInst, MAKEINTRESOURCE(IDD_ENTER_PASSWORD), mainWnd, EnterPasswordDlg) != IDOK) return;
+
+		uint8_t passwordUtf8[512];
+		WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
+		err = import_from_clipboard(passwordUtf8);
 		ReportError(err, L"Import failed");
 	}
 	else {
@@ -1704,9 +1710,11 @@ void ImportFromFile()
 
 	}
 	else if (err == 19) {
-		MessageBox(mainWnd, L"Password", L"TODO: Password needed", MB_OK);
-		char password[1024] = "testpassword";
-		err = import_on_windows((uint16_t*)szPath, (uint8_t *)password);
+		if (DialogBox(hInst, MAKEINTRESOURCE(IDD_ENTER_PASSWORD), mainWnd, EnterPasswordDlg) != IDOK) return;
+
+		uint8_t passwordUtf8[512];
+		WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
+		err = import_on_windows((uint16_t*)szPath, (uint8_t *)passwordUtf8);
 		ReportError(err, L"Import failed");
 	}
 	else {
@@ -2061,6 +2069,57 @@ INT_PTR CALLBACK SetPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 				InvalidateRect(okButton, NULL, FALSE);
 			}
 		}
+		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+		{
+			if (LOWORD(wParam) == IDOK) {
+				GetWindowText(GetDlgItem(hDlg, IDC_PASSWORD_1), passwordWindowBuf, MAX_PASSWORD_LENGTH);
+			}
+			EndDialog(hDlg, LOWORD(wParam));
+			return (INT_PTR)TRUE;
+		}
+		break;
+	}
+	return (INT_PTR)FALSE;
+}
+
+// Message handler for about box.
+INT_PTR CALLBACK EnterPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	UNREFERENCED_PARAMETER(lParam);
+	switch (message)
+	{
+	case WM_INITDIALOG:
+	{
+		SetWindowSubclass(GetDlgItem(hDlg, IDOK), SaveButtonProc, 0, 0);
+		SetWindowSubclass(GetDlgItem(hDlg, IDCANCEL), SaveButtonProc, 0, 0);
+	}
+	return (INT_PTR)TRUE;
+	case WM_CTLCOLORDLG:
+		return (INT_PTR)GetStockBrush(WHITE_BRUSH);
+	case WM_PAINT:
+	{
+		PAINTSTRUCT ps;
+		HDC hdc = BeginPaint(hDlg, &ps);
+
+		WINDOWPLACEMENT p = { 0 };
+		RECT dlgRect;
+		GetClientRect(hDlg, &dlgRect);
+		RECT editAreas[2];
+		for (int i = 0; i < 1; i++) {
+			HWND edit = GetDlgItem(hDlg, IDC_PASSWORD_1 + i);
+			GetWindowPlacement(edit, &p);
+			editAreas[i] = p.rcNormalPosition;
+		}
+
+		PaintEdits(hdc, editAreas, 2);
+		EndPaint(hDlg, &ps);
+	}
+	case WM_CTLCOLORSTATIC:
+		// Forcing white background here avoids having the read-only text fields look odd with a gray center and white trim.
+		SetBkColor((HDC)wParam, RGB(255, 255, 255));
+		SetTextColor((HDC)wParam, RGB(240, 30, 30));
+		return (INT_PTR)GetStockBrush(WHITE_BRUSH);
+	case WM_COMMAND:
 		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
 		{
 			if (LOWORD(wParam) == IDOK) {
