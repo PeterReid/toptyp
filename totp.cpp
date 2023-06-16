@@ -6,17 +6,21 @@
 #include <commctrl.h>
 #include <stdint.h>
 #define MAX_LOADSTRING 100
+#define MAX_PASSWORD_LENGTH 255
 
 // Global Variables:
 HINSTANCE hInst;								// current instance
 TCHAR szTitle[MAX_LOADSTRING];					// The title bar text
 TCHAR szWindowClass[MAX_LOADSTRING];			// the main window class name
 
+wchar_t passwordWindowBuf[MAX_PASSWORD_LENGTH];
+
 // Forward declarations of functions included in this code module:
 ATOM				MyRegisterClass(HINSTANCE hInstance);
 BOOL				InitInstance(HINSTANCE, int);
 LRESULT CALLBACK	WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK	About(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK	SetPasswordDlg(HWND, UINT, WPARAM, LPARAM);
 
 HWND mainWnd = NULL;
 
@@ -438,15 +442,18 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
-			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_ADD);
+			BOOL enabled = IsWindowEnabled(hWnd);
+
+			COLORREF foreground = enabled ? RGB(255,255,255) : RGB(150, 150, 150);
+			COLORREF background = enabled ? RGB(240, 30, 30) : RGB(200, 200, 200);
 			int radius = sizeBasis/3;
 
 
-			HBITMAP corners = CreateRoundedCorner(hdc, RGB(240,30,30), RGB(240,30,30), RGB(255,255,255), radius);
+			HBITMAP corners = CreateRoundedCorner(hdc, background, background, RGB(255,255,255), radius);
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
 			SelectObject(cornersDC, corners);
-			HBRUSH b = CreateSolidBrush(RGB(240,30,30));
+			HBRUSH b = CreateSolidBrush(background);
 
 			RECT r;
 			GetClientRect(hWnd, &r);
@@ -458,7 +465,7 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			BitBlt(hdc, r.right - radius, r.bottom - radius, radius, radius, cornersDC, radius,radius,SRCCOPY);
 
 			HFONT oldFont = (HFONT)SelectObject(hdc, font);
-			SetTextColor(hdc, RGB(255,255,255));
+			SetTextColor(hdc, foreground);
 			SetBkMode(hdc, TRANSPARENT);
 			WCHAR textBuf[256];
 			GetWindowText(hWnd, textBuf, sizeof(textBuf)/sizeof(WCHAR));
@@ -719,7 +726,7 @@ void SetHintingEditText(HWND wnd, LPCTSTR text)
 
 HWND CreateHintingEdit(RECT r, int idc, HintingEditData *hintData)
 {
-	HWND edit = CreateWindow(_T("EDIT"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, r.left,r.top, r.right - r.left,r.bottom - r.top, mainWnd, (HMENU)idc, NULL, NULL);
+	HWND edit = CreateWindow(_T("EDIT"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, r.left,r.top, r.right - r.left,r.bottom - r.top, mainWnd, (HMENU)(UINT_PTR)idc, NULL, NULL);
 	SetWindowLongPtr(edit, GWLP_USERDATA, (LONG_PTR)hintData);
 	SetWindowText(edit, hintData->hintText);
 	SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
@@ -899,7 +906,7 @@ void ShowAdvancedAddOptions(uint32_t algorithm, uint32_t digits, uint32_t period
 			radioArea.right = margin + (mainRect.right - margin - margin) * (i+1) / 3;
 
 			TabParam tabParam = wnds[buttonSet][i];
-			*tabParam.wnd = CreateWindow(_T("BUTTON"), tabParam.text, buttonFlags|WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)tabParam.idc, NULL, NULL);
+			*tabParam.wnd = CreateWindow(_T("BUTTON"), tabParam.text, buttonFlags|WS_CHILD|WS_TABSTOP|BS_AUTORADIOBUTTON|(i==0 ? WS_GROUP : 0), radioArea.left,radioArea.top, radioArea.right - radioArea.left,radioArea.bottom - radioArea.top, mainWnd, (HMENU)(UINT_PTR)tabParam.idc, NULL, NULL);
 			SetWindowSubclass(*tabParam.wnd, RadioButtonProc, 0, 0);
 		}
 	}
@@ -1648,12 +1655,13 @@ void ExportUnencryptedToFile()
 
 void ExportEncryptedToFile()
 {
+	if (DialogBox(hInst, MAKEINTRESOURCE(IDD_SET_PASSWORD), mainWnd, SetPasswordDlg) != IDOK) return;
+	
 	WCHAR szPath[MAX_PATH] = L"";
 	if (!GetFilePath(true, szPath)) return;
 
-	WCHAR password[256] = L"testpassword";
 	uint8_t passwordUtf8[256];
-	WideCharToMultiByte(CP_UTF8, 0, password, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
+	WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
 
 	ReportError(export_to_encrypted_file_on_windows((uint16_t*)szPath, passwordUtf8), L"Export failed.");
 }
@@ -1979,6 +1987,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
+
 // Message handler for about box.
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -1991,6 +2000,72 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_COMMAND:
 		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
 		{
+			EndDialog(hDlg, LOWORD(wParam));
+			return (INT_PTR)TRUE;
+		}
+		break;
+	}
+	return (INT_PTR)FALSE;
+}
+
+// Message handler for about box.
+INT_PTR CALLBACK SetPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	UNREFERENCED_PARAMETER(lParam);
+	switch (message)
+	{
+	case WM_INITDIALOG:
+		{
+		EnableWindow(GetDlgItem(hDlg, IDOK), FALSE);
+		SetWindowSubclass(GetDlgItem(hDlg, IDOK), SaveButtonProc, 0, 0);
+		SetWindowSubclass(GetDlgItem(hDlg, IDCANCEL), SaveButtonProc, 0, 0);
+		}
+		return (INT_PTR)TRUE;
+	case WM_CTLCOLORDLG:
+		return (INT_PTR)GetStockBrush(WHITE_BRUSH);
+	case WM_PAINT:
+	{
+		PAINTSTRUCT ps;
+		HDC hdc = BeginPaint(hDlg, &ps);
+
+		WINDOWPLACEMENT p = { 0 };
+		RECT dlgRect;
+		GetClientRect(hDlg, &dlgRect);
+		RECT editAreas[2];
+		for (int i = 0; i < 2; i++) {
+			HWND edit = GetDlgItem(hDlg, IDC_PASSWORD_1 + i);
+			GetWindowPlacement(edit, &p);
+			editAreas[i] = p.rcNormalPosition;
+			//InflateRect(&editAreas[i], 4, 4);
+		}
+
+		PaintEdits(hdc, editAreas, 2);
+		EndPaint(hDlg, &ps);
+	}
+	case WM_CTLCOLORSTATIC:
+		// Forcing white background here avoids having the read-only text fields look odd with a gray center and white trim.
+		SetBkColor((HDC)wParam, RGB(255, 255, 255));
+		SetTextColor((HDC)wParam, RGB(240, 30, 30));
+		return (INT_PTR)GetStockBrush(WHITE_BRUSH);
+	case WM_COMMAND:
+		if (HIWORD(wParam) == EN_CHANGE) {
+			WCHAR password1[MAX_PASSWORD_LENGTH+1];
+			WCHAR password2[MAX_PASSWORD_LENGTH+1];
+			GetWindowText(GetDlgItem(hDlg, IDC_PASSWORD_1), password1, MAX_PASSWORD_LENGTH);
+			GetWindowText(GetDlgItem(hDlg, IDC_PASSWORD_2), password2, MAX_PASSWORD_LENGTH);
+			size_t len = wcslen(password1);
+			BOOL passwordsGood = len > 0 && len < MAX_PASSWORD_LENGTH && wcscmp(password1, password2) == 0;
+			HWND okButton = GetDlgItem(hDlg, IDOK);
+			if (passwordsGood != IsWindowEnabled(okButton)) {
+				EnableWindow(okButton, passwordsGood);
+				InvalidateRect(okButton, NULL, FALSE);
+			}
+		}
+		if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+		{
+			if (LOWORD(wParam) == IDOK) {
+				GetWindowText(GetDlgItem(hDlg, IDC_PASSWORD_1), passwordWindowBuf, MAX_PASSWORD_LENGTH);
+			}
 			EndDialog(hDlg, LOWORD(wParam));
 			return (INT_PTR)TRUE;
 		}
