@@ -27,6 +27,7 @@ HWND mainWnd = NULL;
 
 HWND accountSearchEdit = NULL;
 HWND scroll = NULL;
+int scrollBarIsForAccountCount = 0;
 
 HFONT iconFont = NULL;
 HFONT font = NULL;
@@ -53,10 +54,12 @@ extern "C" {
 	uint32_t scan_result_count();
 	//uint32_t get_scan_result_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
 	uint32_t add_scan_result(uint32_t index, uint8_t* name);
+	uint32_t set_search_query(uint8_t* query);
 	uint32_t export_to_file_on_windows(uint16_t* path);
 	uint32_t export_to_clipboard();
 	uint32_t export_encrypted_to_clipboard(uint8_t *password);
-	uint32_t import_from_clipboard(uint8_t *password);
+	uint32_t import_from_clipboard(uint8_t* password);
+	uint32_t import_retry(uint8_t *password);
 	uint32_t export_to_encrypted_file_on_windows(uint16_t* path, uint8_t *password);
 	uint32_t import_on_windows(uint16_t* path, uint8_t* password);
 }
@@ -736,12 +739,13 @@ HWND CreateHintingEdit(RECT r, int idc, HintingEditData *hintData)
 
 void InitAccountsTab()
 {
+	ResetHintingEditData(&searchHintingEditData);
 	accountSearchEdit = CreateHintingEdit(editArea, IDC_SEARCH, &searchHintingEditData);
    
 	scroll = CreateWindowEx( 0, // no extended styles 
 		L"SCROLLBAR",           // scroll bar control class 
 		(PTSTR) NULL,           // no window text 
-		WS_CHILD | WS_VISIBLE   // window styles  
+		WS_CHILD   // window styles  
 			| SBS_VERT,         // vertical scroll bar style 
 		scrollRect.left,              // horizontal position 
 		scrollRect.top, // vertical position 
@@ -753,12 +757,26 @@ void InitAccountsTab()
 		(PVOID) NULL            // pointer not needed 
 		);
 
+	scrollBarIsForAccountCount = accounts_len();
+
 	SCROLLINFO info = { 0 };
 	info.cbSize = sizeof(info);
 	info.fMask = SIF_RANGE | SIF_PAGE;
-	info.nMax = accounts_len() * sizeBasis*4;
+	info.nMax = scrollBarIsForAccountCount * sizeBasis*4;
 	info.nPage = scrollRect.bottom - scrollRect.top;
 	SetScrollInfo(scroll, SB_CTL, &info, FALSE);
+
+	HWND wnds[] = {
+		accountSearchEdit, scroll
+	};
+
+	HDWP defer = BeginDeferWindowPos(sizeof(wnds) / sizeof(HWND));
+	for (size_t i = 0; i < sizeof(wnds) / sizeof(HWND); i++) {
+		if (wnds[i]) {
+			DeferWindowPos(defer, wnds[i], NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOREPOSITION | SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW);
+		}
+	}
+	EndDeferWindowPos(defer);
 }
 
 void DestroyAccountsTab()
@@ -986,8 +1004,8 @@ void SaveAccount()
 	WCHAR nameBuffer[255];
 	WCHAR codeBuffer[255];
 
-	GetWindowTextW(addAccountTab.nameEdit, nameBuffer, sizeof(nameBuffer));
-	GetWindowTextW(addAccountTab.codeEdit, codeBuffer, sizeof(codeBuffer));
+	GetWindowTextW(addAccountTab.nameEdit, nameBuffer, sizeof(nameBuffer)/sizeof(WCHAR));
+	GetWindowTextW(addAccountTab.codeEdit, codeBuffer, sizeof(codeBuffer)/sizeof(WCHAR));
 	int tokenLength = addAccountTab.tokenLength10 && (Button_GetState(addAccountTab.tokenLength10) & BST_CHECKED) ? 10
 		: addAccountTab.tokenLength8 && (Button_GetState(addAccountTab.tokenLength8) & BST_CHECKED) ? 8
 		: 6;
@@ -1207,12 +1225,12 @@ void SetActiveTab(int idc, bool andShow)
 	
 	switch (activeTab) {
 	case IDC_TAB_ACCOUNTS: 
-		InitAccountsTab(); 
+		InitAccountsTab();
 		break;
 	case IDC_TAB_ADD: 
 	case IDC_TAB_EDIT: 
 		{
-			InitAddTab(); 
+			InitAddTab();
 			if (andShow) {
 				ShowCreatedAddControls();
 			}
@@ -1325,10 +1343,24 @@ void PaintAccounts(HDC hdc)
 
 	int textHeight = GetTextHeight(itemDC);
 
+	int account_count = accounts_len();
+
+	if (account_count != scrollBarIsForAccountCount) {
+		scrollBarIsForAccountCount = account_count;
+
+		SCROLLINFO info = { 0 };
+		info.cbSize = sizeof(info);
+		info.fMask = SIF_RANGE|SIF_PAGE;
+		info.nMax = scrollBarIsForAccountCount * sizeBasis * 4;
+		info.nPage = scrollRect.bottom - scrollRect.top;
+		SetScrollInfo(scroll, SB_CTL, &info, TRUE);
+	}
+
 	// Draw the actual list of accounts
 	int pos = GetScrollPos(scroll, SB_CTL);
-	int account_count = accounts_len();
-	for (int i=0, listY = listTop - pos; i<account_count; i++, listY += listItemHeight) {
+
+	int i, listY;
+	for (i=0, listY = listTop - pos; i<account_count; i++, listY += listItemHeight) {
 		if (listY + listItemHeight < listTop) continue;
 		if (listY > listBottom) break;
 		RECT divider;
@@ -1443,6 +1475,11 @@ void PaintAccounts(HDC hdc)
 		BitBlt(hdc, 0, listY, scrollRect.left, listItemHeight, itemDC, 0,0, SRCCOPY);
 	}
 
+	if (listY < listBottom) {
+		RECT belowList;
+		SetRect(&belowList, 0, listY, scrollRect.left, listBottom);
+		FillRect(hdc, &belowList, backgroundBrush);
+	}
 	SelectClipRgn(hdc, NULL);
 
 	DeleteObject(itemDC);
@@ -1461,7 +1498,7 @@ void PaintAddTab(HDC hdc)
 	HFONT oldFont = (HFONT)SelectObject(hdc, font);
 
 	int textHeight = GetTextHeight(hdc);
-
+	
 	RECT clientRect;
 	GetClientRect(mainWnd, &clientRect);
 
@@ -1687,11 +1724,6 @@ void ImportFromClipboard()
 	}
 	else if (err == 19) {
 		if (DialogBox(hInst, MAKEINTRESOURCE(IDD_ENTER_PASSWORD), mainWnd, EnterPasswordDlg) != IDOK) return;
-
-		uint8_t passwordUtf8[512];
-		WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
-		err = import_from_clipboard(passwordUtf8);
-		ReportError(err, L"Import failed");
 	}
 	else {
 		ReportError(err, L"Import failed");
@@ -1711,16 +1743,38 @@ void ImportFromFile()
 	}
 	else if (err == 19) {
 		if (DialogBox(hInst, MAKEINTRESOURCE(IDD_ENTER_PASSWORD), mainWnd, EnterPasswordDlg) != IDOK) return;
-
-		uint8_t passwordUtf8[512];
-		WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
-		err = import_on_windows((uint16_t*)szPath, (uint8_t *)passwordUtf8);
-		ReportError(err, L"Import failed");
 	}
 	else {
 		ReportError(err, L"Import failed.");
 	}
 	InvalidateAboveToolbar();
+}
+
+void UpdateSelectionForMousePoint()
+{
+	int y = mousePoint.y;
+	int x = mousePoint.x;
+	if (y >= scrollRect.top && y <= scrollRect.bottom && x <= scrollRect.left) {
+		int pos = GetScrollPos(scroll, SB_CTL);
+		int listItemHeight = ListItemHeight();
+		int itemIdx = (y - scrollRect.top + pos) / listItemHeight;
+		SetSelectedItem(itemIdx);
+
+		// We need to know when the mouse leaves the window, so we can remove the hover effect then.
+		// TrackMouseEvent needs to be called once to start listening for that.
+		if (!trackingMouseLeave) {
+			TRACKMOUSEEVENT tme = { 0 };
+			tme.cbSize = sizeof(tme);
+			tme.hwndTrack = mainWnd;
+			tme.dwFlags = TME_LEAVE;
+			TrackMouseEvent(&tme);
+			trackingMouseLeave = true;
+		}
+
+	}
+	else {
+		SetSelectedItem(-1);
+	}
 }
 
 //
@@ -1773,6 +1827,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			ImportFromFile();
 			break;
 		case IDC_SEARCH:
+			if (HIWORD(wParam) == EN_CHANGE) {
+				int foo = 0;
+				WCHAR search[255] = L"";
+				uint8_t searchUtf8[512] = { 0 };
+				if (!searchHintingEditData.showingHint) {
+					GetWindowText(accountSearchEdit, search, sizeof(search) / sizeof(WCHAR));
+					WideCharToMultiByte(CP_UTF8, 0, search, -1, (char*)searchUtf8, sizeof(searchUtf8), 0, 0);
+				}
+				set_search_query(searchUtf8);
+				InvalidateAccountList();
+			}
+			// continue...
 		case IDC_NAME:
 		case IDC_CODE:
 			{
@@ -1791,8 +1857,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					{
 						HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr((HWND)lParam, GWLP_USERDATA);
 						if (!hintingEditData->showingHint && GetWindowTextLength((HWND)lParam)==0) {
-							SetWindowText((HWND)lParam, hintingEditData->hintText);
 							hintingEditData->showingHint = TRUE;
+							SetWindowText((HWND)lParam, hintingEditData->hintText);
 						}
 						hintingEditData->hasFocus = FALSE;
 					}
@@ -1819,6 +1885,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
 		break;
+	case WM_MOUSEWHEEL:
+		{
+			int dScroll = ((int16_t)HIWORD(wParam));
+			dScroll /= -10;
+			if (dScroll) {
+				SetScrollPos(scroll, SB_CTL, GetScrollPos(scroll, SB_CTL) + dScroll, TRUE);
+			}
+			RECT r;
+			r.left = 0;
+			r.right = scrollRect.left;
+			r.bottom = scrollRect.bottom;
+			r.top = scrollRect.top;
+			InvalidateRect(hWnd, &r, FALSE);
+			UpdateSelectionForMousePoint();
+			break;
+		}
 	case WM_VSCROLL:
 		{
 			int type = LOWORD(wParam);
@@ -1838,7 +1920,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				break;
 			}
 			if (dScroll) {
-				SetScrollPos(scroll, SB_CTL, GetScrollPos(scroll, SB_VERT) + dScroll, FALSE);
+				SetScrollPos(scroll, SB_CTL, GetScrollPos(scroll, SB_CTL) + dScroll, FALSE);
 			}
 			RECT r;
 			r.left = 0;
@@ -1878,25 +1960,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			mousePoint.x = x;
 			mousePoint.y = y;
 
-			if (y >= scrollRect.top && y <= scrollRect.bottom && x <= scrollRect.left) {
-				int pos = GetScrollPos(scroll, SB_CTL);
-				int listItemHeight = ListItemHeight();
-				int itemIdx = (y - scrollRect.top + pos) / listItemHeight;
-				SetSelectedItem(itemIdx);
-
-				// We need to know when the mouse leaves the window, so we can remove the hover effect then.
-				// TrackMouseEvent needs to be called once to start listening for that.
-				if (!trackingMouseLeave) {
-					TRACKMOUSEEVENT tme = { 0 };
-					tme.cbSize = sizeof(tme);
-					tme.hwndTrack = mainWnd;
-					tme.dwFlags = TME_LEAVE;
-					TrackMouseEvent(&tme);
-					trackingMouseLeave = true;
-				}
-
-			} else {
-				SetSelectedItem(-1);
+			if (activeTab == IDC_TAB_ACCOUNTS) {
+				UpdateSelectionForMousePoint();
 			}
 		}
 		break;
@@ -2124,7 +2189,17 @@ INT_PTR CALLBACK EnterPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM
 		{
 			if (LOWORD(wParam) == IDOK) {
 				GetWindowText(GetDlgItem(hDlg, IDC_PASSWORD_1), passwordWindowBuf, MAX_PASSWORD_LENGTH);
+				uint8_t passwordUtf8[512];
+				WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
+
+				uint32_t err = import_retry(passwordUtf8);
+				if (err != 0) {
+					ReportError(err, L"Import failed");
+					SetFocus(GetDlgItem(hDlg, IDC_PASSWORD_1));
+					return (INT_PTR)TRUE;
+				}
 			}
+			
 			EndDialog(hDlg, LOWORD(wParam));
 			return (INT_PTR)TRUE;
 		}

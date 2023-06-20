@@ -31,9 +31,12 @@ use chacha20poly1305::{
 static ACCOUNTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
     Mutex::new(vec![])
 });
+static SEARCH_QUERY: Lazy<Mutex<String>> = Lazy::new(|| { Mutex::new(String::new()) });
+static SEARCH_RESULTS: Lazy<Mutex<Vec<usize>>> = Lazy::new(|| { Mutex::new(vec![]) });
 static SCAN_RESULTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
     Mutex::new(vec![])
 });
+static IMPORT_CONTENTS: Lazy<Mutex<String>> = Lazy::new(|| { Mutex::new(String::new()) });
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 enum Algorithm {
@@ -95,6 +98,7 @@ enum TotpError {
     DecryptFailed = 22,
     UndersizedBuffer = 23,
     UnsupportedBufferSize = 24,
+    MalformedSearchQuery = 25,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -268,15 +272,17 @@ fn text_to_accounts(text: &str) -> Result<Vec<Account>, TotpError> {
 fn load_accounts_inner() -> Result<(), TotpError> {
     // TODO: Also try temp path
     let data = file_to_string(&get_save_file())?;
-    let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
-    *accounts.deref_mut() = text_to_accounts(&data)?;
-    Ok( () )
+    {
+        let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
+        *accounts.deref_mut() = text_to_accounts(&data)?;
+    }
+    update_search_results()
 }
 
 
 #[no_mangle]
 pub extern "C" fn accounts_len() -> u32 {
-    ACCOUNTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
+    SEARCH_RESULTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
 }
 
 fn result_to_error_code(r: Result<(), TotpError>) -> u32 {
@@ -293,10 +299,16 @@ pub extern "C" fn get_account_name(index: u32, dest: *mut u8, dest_len: u32) -> 
 
 fn get_account_by_index(accounts: &mut Vec<Account>, index: u32) -> Result<&mut Account, TotpError> {
     let index: usize = index.try_into().map_err(|_| TotpError::IndexOutOfRange)?;
-    if index >= accounts.len() {
+    let search_results = SEARCH_RESULTS.lock().map_err(|_| TotpError::InternalError)?;
+    
+    if index >= search_results.len() {
         Err(TotpError::IndexOutOfRange)?;
     }
-    Ok(&mut accounts[index])
+    let accounts_idx = search_results[index];
+    if accounts_idx >= accounts.len() {
+        return Err(TotpError::InternalError); // Search results incoherent
+    }
+    Ok(&mut accounts[accounts_idx])
 }
 
 fn get_account_name_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<(), TotpError> {
@@ -405,6 +417,38 @@ fn delete_account_inner(index: u32) -> Result<(), TotpError> {
     load_accounts_inner()?;
     
     Ok( () )
+}
+
+#[no_mangle]
+pub extern "C" fn set_search_query(query: *const u8) -> u32 {
+    result_to_error_code(set_search_query_inner(query))
+}
+
+fn update_search_results() -> Result<(), TotpError> {
+    let accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
+    let mut search_results = SEARCH_RESULTS.lock().map_err(|_| TotpError::InternalError)?;
+    let search_query = SEARCH_QUERY.lock().map_err(|_| TotpError::InternalError)?;
+    let search_query_str: String = search_query.clone().to_lowercase();
+    
+    *search_results = (*accounts).iter().enumerate().filter_map(|(idx, account)| {
+        if account.name.to_lowercase().find(&search_query_str).is_some() {
+            Some(idx)
+        } else {
+            None
+        }
+    }).collect();
+    
+    Ok( () )
+}
+
+fn set_search_query_inner(query: *const u8) -> Result<(), TotpError> {
+    let query_str = unsafe { CStr::from_ptr(query as *const i8) };
+    {
+        let mut search_query = SEARCH_QUERY.lock().map_err(|_| TotpError::InternalError)?;
+        
+        *search_query = query_str.to_str().map_err(|_| TotpError::MalformedSearchQuery)?.to_string();
+    }
+    update_search_results()
 }
 
 fn file_to_string(path: &Path) -> Result<String, TotpError> {
@@ -716,8 +760,20 @@ pub extern "C" fn import_from_clipboard(password: *const u8) -> u32 {
 
 fn import_from_clipboard_inner(password: *const u8) -> Result<(), TotpError> {
     let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
-    let clipboard_contents = clipboard.get_text().map_err(|_| TotpError::InternalError)?;
-    import_string(clipboard_contents, password)
+    let mut contents = IMPORT_CONTENTS.lock().map_err(|_| TotpError::InternalError)?;
+    *contents = clipboard.get_text().map_err(|_| TotpError::InternalError)?;
+    
+    import_string(&contents, password)
+}
+
+#[no_mangle]
+pub extern "C" fn import_retry(password: *const u8) -> u32 {
+    result_to_error_code(import_retry_inner(password))
+}
+
+fn import_retry_inner(password: *const u8) -> Result<(), TotpError> {
+    let contents = IMPORT_CONTENTS.lock().unwrap();
+    import_string(&contents, password)
 }
 
 fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
@@ -746,8 +802,8 @@ fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
     base32::decode(base32::Alphabet::RFC4648{padding: false}, &base32_chars)
 }
 
-fn import_plaintext(plaintext: String) -> Result<(), TotpError> {
-    let imported_accounts = text_to_accounts(&plaintext)?;
+fn import_plaintext(plaintext: &str) -> Result<(), TotpError> {
+    let imported_accounts = text_to_accounts(plaintext)?;
     atomic_file_modification(&|mut data: Vec<String>| {
         let mut existings = HashSet::new();
         for existing in data.iter() {
@@ -783,17 +839,18 @@ fn decrypt(ciphertext: &[u8], password: &str) -> Result<String, TotpError> {
 }
 
 fn import_inner(path: OsString, password: *const u8) -> Result<(), TotpError> {
-    let data = file_to_string(&PathBuf::from(path))?;
-    import_string(data, password)
+    let mut contents = IMPORT_CONTENTS.lock().map_err(|_| TotpError::InternalError)?;
+    *contents = file_to_string(&PathBuf::from(path))?;
+    import_string(&contents, password)
 }
     
-fn import_string(data: String, password: *const u8) -> Result<(), TotpError> {
+fn import_string(data: &str, password: *const u8) -> Result<(), TotpError> {
     let password = if password.is_null() { None } else { Some(unsafe { CStr::from_ptr(password as *const i8) }) };
     if let Some(ciphertext) = extract_ciphertext(&data) {
         match password {
             Some(password) => {
                 let plaintext: String = decrypt(&ciphertext, password.to_str().map_err(|_| TotpError::UnsupportedPassword)?)?;
-                import_plaintext(plaintext)?;
+                import_plaintext(&plaintext)?;
             }
             None => { return Err(TotpError::PasswordNeededForImport); }
         }
