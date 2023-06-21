@@ -739,6 +739,21 @@ HWND CreateHintingEdit(RECT r, int idc, HintingEditData *hintData)
 
 void InitAccountsTab()
 {
+	RECT clientRect;
+	GetClientRect(mainWnd, &clientRect);
+
+	int editMargin = sizeBasis * 3 / 2;
+
+	editArea.left = editMargin;
+	editArea.top = editMargin;
+	editArea.right = clientRect.right - editMargin;
+	editArea.bottom = editArea.top + textBoxHeight;
+
+	scrollRect = clientRect;
+	scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
+	scrollRect.top = editArea.bottom + editMargin;
+	scrollRect.bottom -= bottomButtonHeight;
+
 	ResetHintingEditData(&searchHintingEditData);
 	accountSearchEdit = CreateHintingEdit(editArea, IDC_SEARCH, &searchHintingEditData);
    
@@ -764,14 +779,22 @@ void InitAccountsTab()
 	info.fMask = SIF_RANGE | SIF_PAGE;
 	info.nMax = scrollBarIsForAccountCount * sizeBasis*4;
 	info.nPage = scrollRect.bottom - scrollRect.top;
-	SetScrollInfo(scroll, SB_CTL, &info, FALSE);
+
+	bool scrollBarShowing = info.nMax > (int)info.nPage;
+	if (scrollBarShowing) {
+		SetScrollInfo(scroll, SB_CTL, &info, FALSE);
+	}
+	else {
+		scrollRect.left = scrollRect.right;
+	}
 
 	HWND wnds[] = {
-		accountSearchEdit, scroll
+		accountSearchEdit, 
+		scroll // should be last
 	};
 
 	HDWP defer = BeginDeferWindowPos(sizeof(wnds) / sizeof(HWND));
-	for (size_t i = 0; i < sizeof(wnds) / sizeof(HWND); i++) {
+	for (size_t i = 0; i < sizeof(wnds) / sizeof(HWND) - (scrollBarShowing ? 0 : 1); i++) {
 		if (wnds[i]) {
 			DeferWindowPos(defer, wnds[i], NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOREPOSITION | SWP_NOZORDER | SWP_NOSIZE | SWP_SHOWWINDOW);
 		}
@@ -1109,22 +1132,11 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    GetTextMetrics (dc, &tm);
    SelectObject(dc, oldObj);
    textBoxHeight = tm.tmHeight;
-
-   int editMargin = sizeBasis*3/2;
-   
+	
    int bottomCornerButtonSize = (clientRect.right - clientRect.left) / 3;
    bottomButtonHeight = (int)(bottomCornerButtonSize / 1.618);
 
-   editArea.left = editMargin;
-   editArea.top = editMargin;
-   editArea.right = clientRect.right - editMargin;
-   editArea.bottom = editArea.top + textBoxHeight;
-
-   scrollRect = clientRect;
-   scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
-   scrollRect.top = editArea.bottom + editMargin;
-   scrollRect.bottom -= bottomButtonHeight;
-
+   
    
    HWND accountsTabWnd = CreateWindowEx( 0,
 	   L"BUTTON",
@@ -1329,6 +1341,33 @@ void PaintAccounts(HDC hdc)
 	int listItemHeight = ListItemHeight();
 	int dividerHeight = sizeBasis/6;
 
+
+	int account_count = accounts_len();
+
+	if (account_count != scrollBarIsForAccountCount) {
+		scrollBarIsForAccountCount = account_count;
+
+		SCROLLINFO info = { 0 };
+		info.cbSize = sizeof(info);
+		info.fMask = SIF_RANGE | SIF_PAGE;
+		info.nMax = scrollBarIsForAccountCount * sizeBasis * 4;
+		info.nPage = scrollRect.bottom - scrollRect.top;
+		if (info.nMax > (int)info.nPage) {
+			if (scrollRect.left == scrollRect.right) {
+				ShowWindow(scroll, SW_SHOW);
+				scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
+			}
+		}
+		else {
+			if (scrollRect.left != scrollRect.right) {
+				ShowWindow(scroll, SW_HIDE);
+				scrollRect.left = scrollRect.right;
+			}
+		}
+		SetScrollInfo(scroll, SB_CTL, &info, TRUE);
+	}
+
+
 	HRGN listRegion = CreateRectRgn(area.left, listTop, scrollRect.left, listBottom); 
 	SelectClipRgn (hdc, listRegion);
 
@@ -1342,19 +1381,6 @@ void PaintAccounts(HDC hdc)
 	SelectObject(itemDC, font);
 
 	int textHeight = GetTextHeight(itemDC);
-
-	int account_count = accounts_len();
-
-	if (account_count != scrollBarIsForAccountCount) {
-		scrollBarIsForAccountCount = account_count;
-
-		SCROLLINFO info = { 0 };
-		info.cbSize = sizeof(info);
-		info.fMask = SIF_RANGE|SIF_PAGE;
-		info.nMax = scrollBarIsForAccountCount * sizeBasis * 4;
-		info.nPage = scrollRect.bottom - scrollRect.top;
-		SetScrollInfo(scroll, SB_CTL, &info, TRUE);
-	}
 
 	// Draw the actual list of accounts
 	int pos = GetScrollPos(scroll, SB_CTL);
