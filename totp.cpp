@@ -37,6 +37,7 @@ int trackingMouseLeave = false;
 
 UINT_PTR codeDrawingProgressTimer = 0;
 
+#define COPIED_USING_KEYBOARD -2
 int copiedFromItem = -1;
 char copiedCodeUtf8[50] = { 0 };
 uint32_t editingAccountIndex = 0;
@@ -688,35 +689,6 @@ LRESULT CALLBACK StaticLabelProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
-
-
-struct HintingEditData {
-	BOOL showingHint;
-	BOOL hasFocus;
-	LPCTSTR hintText;
-};
-
-HintingEditData searchHintingEditData = { TRUE, FALSE, L"Search..." };
-HintingEditData addAccountTabNameEditData = { TRUE, FALSE, L"e.g. example.com" };
-HintingEditData addAccountTabCodeEditData = { TRUE, FALSE, L"e.g. L9WPBRYZLHALSNMW" };
-
-void ResetHintingEditData(HintingEditData *data) {
-	data->showingHint = TRUE;
-	data->hasFocus = FALSE;
-}
-
-void SetHintingEditText(HWND wnd, LPCTSTR text)
-{
-	HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr(wnd, GWLP_USERDATA);
-	if (*text == 0) {
-		SetWindowText(wnd, hintingEditData->hintText);
-		hintingEditData->showingHint = true;
-	} else {
-		SetWindowText(wnd, text);
-		hintingEditData->showingHint = false;
-	}
-}
-
 //
 //   FUNCTION: InitInstance(HINSTANCE, int)
 //
@@ -728,11 +700,10 @@ void SetHintingEditText(HWND wnd, LPCTSTR text)
 //        create and display the main program window.
 //
 
-HWND CreateHintingEdit(RECT r, int idc, HintingEditData *hintData)
+HWND CreateHintingEdit(RECT r, int idc, WCHAR *hintText)
 {
 	HWND edit = CreateWindow(_T("EDIT"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP, r.left,r.top, r.right - r.left,r.bottom - r.top, mainWnd, (HMENU)(UINT_PTR)idc, NULL, NULL);
-	SetWindowLongPtr(edit, GWLP_USERDATA, (LONG_PTR)hintData);
-	SetWindowText(edit, hintData->hintText);
+	Edit_SetCueBannerTextFocused(edit, hintText, TRUE);
 	SendMessage(edit, WM_SETFONT, (WPARAM)font, FALSE);
 	return edit;
 }
@@ -754,8 +725,7 @@ void InitAccountsTab()
 	scrollRect.top = editArea.bottom + editMargin;
 	scrollRect.bottom -= bottomButtonHeight;
 
-	ResetHintingEditData(&searchHintingEditData);
-	accountSearchEdit = CreateHintingEdit(editArea, IDC_SEARCH, &searchHintingEditData);
+	accountSearchEdit = CreateHintingEdit(editArea, IDC_SEARCH, L"Search...");
    
 	scroll = CreateWindowEx( 0, // no extended styles 
 		L"SCROLLBAR",           // scroll bar control class 
@@ -800,6 +770,8 @@ void InitAccountsTab()
 		}
 	}
 	EndDeferWindowPos(defer);
+
+	SetFocus(accountSearchEdit);
 }
 
 void DestroyAccountsTab()
@@ -831,9 +803,6 @@ struct TabParam {
 
 void InitAddTab()
 {
-	ResetHintingEditData(&addAccountTabNameEditData);
-	ResetHintingEditData(&addAccountTabCodeEditData);
-
 	RECT mainRect;
 	GetClientRect(mainWnd, &mainRect);
 
@@ -849,12 +818,12 @@ void InitAddTab()
 	addAccountTab.nameEditArea.right = mainRect.right - margin - textBoxMargin;
 	addAccountTab.nameEditArea.bottom = addAccountTab.nameEditArea.top + textBoxHeight;
 
-	addAccountTab.nameEdit = CreateHintingEdit(addAccountTab.nameEditArea, IDC_NAME, &addAccountTabNameEditData);
+	addAccountTab.nameEdit = CreateHintingEdit(addAccountTab.nameEditArea, IDC_NAME, L"e.g. example.com");
 
 	addAccountTab.codeEditArea = addAccountTab.nameEditArea;
 	addAccountTab.codeEditArea.top = componentTop + (componentBottom - componentTop) * 1 / 5 + componentPlacementFromTop + textBoxMargin;
 	addAccountTab.codeEditArea.bottom = addAccountTab.codeEditArea.top + textBoxHeight;
-	addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, &addAccountTabCodeEditData);
+	addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, L"e.g. L9WPBRYZLHALSNMW");
 
 	addAccountTab.advancedMode = false;
 	
@@ -916,7 +885,6 @@ void ShowAdvancedAddOptions(uint32_t algorithm, uint32_t digits, uint32_t period
 	addAccountTab.codeEditArea.top = componentTop + (componentBottom - componentTop) * 1 / 5 + componentPlacementFromTop + textBoxMargin;
 	addAccountTab.codeEditArea.bottom = addAccountTab.codeEditArea.top + textBoxHeight;
 	MoveWindow(addAccountTab.codeEdit, addAccountTab.codeEditArea.left, addAccountTab.codeEditArea.top, addAccountTab.codeEditArea.right - addAccountTab.codeEditArea.left, addAccountTab.codeEditArea.bottom - addAccountTab.codeEditArea.top, FALSE);
-	//addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, &addAccountTabCodeEditData);
 
 	addAccountTab.advancedMode = true;
 
@@ -994,6 +962,8 @@ void ShowCreatedAddControls()
 		}
 	}
 	EndDeferWindowPos(defer);
+
+	SetFocus(addAccountTab.nameEdit);
 }
 
 void DestroyAddTab()
@@ -1111,8 +1081,14 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    int width = sizeBasis*24;
    int height = (int)(width * 1.618);
    
-   hWnd = mainWnd= CreateWindow(szWindowClass, szTitle, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-      CW_USEDEFAULT, 0, width, height, NULL, NULL, hInstance, NULL);
+   const POINT ptZero = { 0, 0 };
+   HMONITOR hMon = MonitorFromPoint(ptZero, MONITOR_DEFAULTTOPRIMARY);
+   MONITORINFO mi = { sizeof(mi) };
+   GetMonitorInfo(hMon, &mi);
+   
+   hWnd = mainWnd = CreateWindowEx(0, szWindowClass, szTitle, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+      mi.rcWork.left + (mi.rcWork.right - mi.rcWork.left - width) / 2,
+	  mi.rcWork.top + (mi.rcWork.bottom - mi.rcWork.top - height) / 2, width, height, NULL, NULL, hInstance, NULL);
 
    if (!hWnd)
    {
@@ -1279,9 +1255,14 @@ static int ListItemHeight() {
 RECT codeHitArea = { 0 };
 POINT mousePoint = { 0 };
 
+HCURSOR setCursorTo = 0;
 bool UpdateMouseCursor() {
 	if (activeTab == IDC_TAB_ACCOUNTS) {
-		SetCursor( selectedItem>=0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor );
+		HCURSOR targetCursor = selectedItem >= 0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor;
+		if (targetCursor != setCursorTo) {
+			SetCursor(targetCursor);
+			setCursorTo = targetCursor;
+		}
 		return true;
 	}
 	return false;
@@ -1385,6 +1366,8 @@ void PaintAccounts(HDC hdc)
 	// Draw the actual list of accounts
 	int pos = GetScrollPos(scroll, SB_CTL);
 
+	bool drewKeyboardCopyiedCode = false;
+
 	int i, listY;
 	for (i=0, listY = listTop - pos; i<account_count; i++, listY += listItemHeight) {
 		if (listY + listItemHeight < listTop) continue;
@@ -1400,7 +1383,9 @@ void PaintAccounts(HDC hdc)
 		itemArea.bottom = listItemHeight - dividerHeight;
 		FillRect(itemDC, &itemArea, backgroundBrush);
 
-		if (i == selectedItem) {
+		bool keyboardCopyCandidate = (selectedItem == COPIED_USING_KEYBOARD && copiedFromItem == COPIED_USING_KEYBOARD && i == 0);
+
+		if (i == selectedItem || keyboardCopyCandidate) {
 			uint32_t millisPerCode = 1, millisIntoCode = 0;
 
 			WCHAR ch[50];
@@ -1409,81 +1394,87 @@ void PaintAccounts(HDC hdc)
 				continue;
 			}
 
-			bool copiedThisCode = copiedFromItem == i && strcmp(copiedCodeUtf8, codeUtf8)==0;
+			bool copiedThisCode = (copiedFromItem == i || ((selectedItem==COPIED_USING_KEYBOARD||selectedItem==0) && copiedFromItem==COPIED_USING_KEYBOARD && i==0)) && strcmp(copiedCodeUtf8, codeUtf8) == 0;
 			
-			size_t codeLength = strlen(codeUtf8);
-			if (codeLength == 6) { // XXX XXX
-				codeUtf8[7] = 0;
-				codeUtf8[6] = codeUtf8[5];
-				codeUtf8[5] = codeUtf8[4];
-				codeUtf8[4] = codeUtf8[3];
-				codeUtf8[3] = ' ';
-			} else if (codeLength == 8) { // XXXX XXXX
-				codeUtf8[9] = 0;
-				codeUtf8[8] = codeUtf8[7];
-				codeUtf8[7] = codeUtf8[6];
-				codeUtf8[6] = codeUtf8[5];
-				codeUtf8[5] = codeUtf8[4];
-				codeUtf8[4] = ' ';
-			} else if (codeLength == 10) { // XXX XXX XXXX
-				codeUtf8[12] = 0;
-				codeUtf8[11] = codeUtf8[9];
-				codeUtf8[10] = codeUtf8[8];
-				codeUtf8[9] = codeUtf8[7];
-				codeUtf8[8] = codeUtf8[6];
-				codeUtf8[7] = ' ';
-				codeUtf8[6] = codeUtf8[5];
-				codeUtf8[5] = codeUtf8[4];
-				codeUtf8[4] = codeUtf8[3];
-				codeUtf8[3] = ' ';
+			if (i == selectedItem || copiedThisCode) {
+				if (keyboardCopyCandidate) drewKeyboardCopyiedCode = true;
+
+				size_t codeLength = strlen(codeUtf8);
+				if (codeLength == 6) { // XXX XXX
+					codeUtf8[7] = 0;
+					codeUtf8[6] = codeUtf8[5];
+					codeUtf8[5] = codeUtf8[4];
+					codeUtf8[4] = codeUtf8[3];
+					codeUtf8[3] = ' ';
+				}
+				else if (codeLength == 8) { // XXXX XXXX
+					codeUtf8[9] = 0;
+					codeUtf8[8] = codeUtf8[7];
+					codeUtf8[7] = codeUtf8[6];
+					codeUtf8[6] = codeUtf8[5];
+					codeUtf8[5] = codeUtf8[4];
+					codeUtf8[4] = ' ';
+				}
+				else if (codeLength == 10) { // XXX XXX XXXX
+					codeUtf8[12] = 0;
+					codeUtf8[11] = codeUtf8[9];
+					codeUtf8[10] = codeUtf8[8];
+					codeUtf8[9] = codeUtf8[7];
+					codeUtf8[8] = codeUtf8[6];
+					codeUtf8[7] = ' ';
+					codeUtf8[6] = codeUtf8[5];
+					codeUtf8[5] = codeUtf8[4];
+					codeUtf8[4] = codeUtf8[3];
+					codeUtf8[3] = ' ';
+				}
+				MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS | MB_USEGLYPHCHARS, (char*)codeUtf8, sizeof(codeUtf8), ch, sizeof(ch) / sizeof(*ch));
+
+				RECT codeRect = divider;
+				codeRect.top = (listItemHeight - textHeight) / 2;
+				codeRect.right -= sizeBasis;
+				RECT codeMeasureRect = codeRect;
+				DrawText(itemDC, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
+				int codeWidth = codeMeasureRect.right - codeMeasureRect.left;
+
+
+				DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE | DT_RIGHT);
+				codeHitArea = codeRect;
+				codeHitArea.top += listY;
+				codeHitArea.left = codeHitArea.right - codeWidth;
+				codeHitArea.bottom = codeMeasureRect.bottom + listY;
+				UpdateMouseCursor();
+
+				int pixelProgress = (int)(codeWidth * (double)millisIntoCode / millisPerCode);
+
+				HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
+				SelectClipRgn(itemDC, redCode);
+				COLORREF oldColor = SetTextColor(itemDC, TabForegroundColor(true));
+				DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE | DT_RIGHT);
+				SetTextColor(itemDC, oldColor);
+				SelectClipRgn(itemDC, NULL);
+				DeleteObject(redCode);
+
+				if (copiedThisCode) {
+					SelectObject(itemDC, iconFont);
+					RECT copiedRect = codeRect;
+					copiedRect.bottom = codeRect.top;
+					copiedRect.top = copiedRect.bottom - textHeight;
+					copiedRect.left = copiedRect.right - codeWidth;
+					DrawText(itemDC, L"Copied", -1, &copiedRect, DT_SINGLELINE | DT_CENTER | DT_BOTTOM | DT_NOCLIP);
+
+					copiedRect.top = codeRect.top + textHeight;
+					copiedRect.bottom = copiedRect.top + textHeight;
+					DrawText(itemDC, L"to clipboard", -1, &copiedRect, DT_SINGLELINE | DT_CENTER | DT_TOP | DT_NOCLIP);
+					SelectObject(itemDC, font);
+				}
+
+				// Time a redraw for when the above clipping region grows by a pixel.
+				if (codeDrawingProgressTimer) {
+					KillTimer(mainWnd, codeDrawingProgressTimer);
+				}
+				int nextPixelMillis = (pixelProgress + 1) * millisPerCode / codeWidth;
+				codeDrawingProgressTimer = SetTimer(mainWnd, ID_CODE_DRAWING_PROGRESS, nextPixelMillis - millisIntoCode + 10, NULL); // 10ms is an unnoticable slop, in case the WM_TIMER timing is not very accurate
 			}
-			MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (char *)codeUtf8, sizeof(codeUtf8), ch, sizeof(ch)/sizeof(*ch));
-
-			RECT codeRect = divider;
-			codeRect.top = (listItemHeight - textHeight)/2;
-			codeRect.right -= sizeBasis;
-			RECT codeMeasureRect = codeRect;
-			DrawText(itemDC, ch, -1, &codeMeasureRect, DT_SINGLELINE | DT_CALCRECT);
-			int codeWidth = codeMeasureRect.right - codeMeasureRect.left;
-
-
-			DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
-			codeHitArea = codeRect;
-			codeHitArea.top += listY;
-			codeHitArea.left = codeHitArea.right - codeWidth;
-			codeHitArea.bottom = codeMeasureRect.bottom + listY;
-			UpdateMouseCursor();
-
-			int pixelProgress = (int)(codeWidth * (double)millisIntoCode / millisPerCode);
-
-			HRGN redCode = CreateRectRgn(codeRect.right - codeWidth, codeRect.top, codeRect.right - codeWidth + pixelProgress, codeRect.bottom);
-			SelectClipRgn(itemDC, redCode);
-			COLORREF oldColor = SetTextColor(itemDC, TabForegroundColor(true));
-			DrawText(itemDC, ch, -1, &codeRect, DT_SINGLELINE|DT_RIGHT);
-			SetTextColor(itemDC, oldColor);
-			SelectClipRgn(itemDC, NULL);
-			DeleteObject(redCode);
-
-			if (copiedThisCode) {
-				SelectObject(itemDC, iconFont);
-				RECT copiedRect = codeRect;
-				copiedRect.bottom = codeRect.top;
-				copiedRect.top = copiedRect.bottom - textHeight;
-				copiedRect.left = copiedRect.right - codeWidth;
-				DrawText(itemDC, L"Copied", -1, &copiedRect, DT_SINGLELINE|DT_CENTER|DT_BOTTOM|DT_NOCLIP);
-
-				copiedRect.top = codeRect.top + textHeight;
-				copiedRect.bottom = copiedRect.top + textHeight;
-				DrawText(itemDC, L"to clipboard", -1, &copiedRect, DT_SINGLELINE|DT_CENTER|DT_TOP|DT_NOCLIP);
-				SelectObject(itemDC, font);
-			}
-
-			// Time a redraw for when the above clipping region grows by a pixel.
-			if (codeDrawingProgressTimer) {
-				KillTimer(mainWnd, codeDrawingProgressTimer);
-			}
-			int nextPixelMillis = (pixelProgress + 1) * millisPerCode / codeWidth;
-			codeDrawingProgressTimer = SetTimer(mainWnd, ID_CODE_DRAWING_PROGRESS, nextPixelMillis - millisIntoCode + 10, NULL); // 10ms is an unnoticable slop, in case the WM_TIMER timing is not very accurate
 		}
 
 		RECT textRect = divider;
@@ -1499,6 +1490,15 @@ void PaintAccounts(HDC hdc)
 		FillRect(itemDC, &divider, dividerBrush);
 
 		BitBlt(hdc, 0, listY, scrollRect.left, listItemHeight, itemDC, 0,0, SRCCOPY);
+	}
+
+	if (copiedFromItem == COPIED_USING_KEYBOARD && !drewKeyboardCopyiedCode) {
+		// This state should not linger if the list is changed such that the copied code
+		// no longer shows. That could cause the Copied to Clipboard notification to 
+		// jump around as the search results change, which is technically correct but
+		// not really the intention of showing it. We just want to show that the Enter
+		// press did something.
+		copiedFromItem = -1;
 	}
 
 	if (listY < listBottom) {
@@ -1591,8 +1591,8 @@ void EditAccount(int idx, bool fromScanResults)
 
 	SetActiveTab(fromScanResults ? IDC_TAB_ADD : IDC_TAB_EDIT, false);
 
-	SetHintingEditText(addAccountTab.nameEdit, nameBuf);
-	SetHintingEditText(addAccountTab.codeEdit, codeBuf);
+	SetWindowText(addAccountTab.nameEdit, nameBuf);
+	SetWindowText(addAccountTab.codeEdit, codeBuf);
 	if (fromScanResults) {
 		SendMessage(addAccountTab.codeEdit, EM_SETREADONLY, TRUE, 0);
 	}
@@ -1784,6 +1784,9 @@ void UpdateSelectionForMousePoint()
 		int pos = GetScrollPos(scroll, SB_CTL);
 		int listItemHeight = ListItemHeight();
 		int itemIdx = (y - scrollRect.top + pos) / listItemHeight;
+		if (itemIdx >= scrollBarIsForAccountCount) {
+			itemIdx = -1;
+		}
 		SetSelectedItem(itemIdx);
 
 		// We need to know when the mouse leaves the window, so we can remove the hover effect then.
@@ -1857,42 +1860,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				int foo = 0;
 				WCHAR search[255] = L"";
 				uint8_t searchUtf8[512] = { 0 };
-				if (!searchHintingEditData.showingHint) {
-					GetWindowText(accountSearchEdit, search, sizeof(search) / sizeof(WCHAR));
-					WideCharToMultiByte(CP_UTF8, 0, search, -1, (char*)searchUtf8, sizeof(searchUtf8), 0, 0);
-				}
+				GetWindowText(accountSearchEdit, search, sizeof(search) / sizeof(WCHAR));
+				WideCharToMultiByte(CP_UTF8, 0, search, -1, (char*)searchUtf8, sizeof(searchUtf8), 0, 0);
 				set_search_query(searchUtf8);
 				InvalidateAccountList();
 			}
-			// continue...
-		case IDC_NAME:
-		case IDC_CODE:
-			{
-				switch (wmEvent) {
-				case EN_SETFOCUS:
-					{
-						HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr((HWND)lParam, GWLP_USERDATA);
-						if (hintingEditData->showingHint) {
-							SetWindowText((HWND)lParam, L"");
-							hintingEditData->showingHint = FALSE;
-						}
-						hintingEditData->hasFocus = TRUE;
-					}
-					break;
-				case EN_KILLFOCUS:
-					{
-						HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr((HWND)lParam, GWLP_USERDATA);
-						if (!hintingEditData->showingHint && GetWindowTextLength((HWND)lParam)==0) {
-							hintingEditData->showingHint = TRUE;
-							SetWindowText((HWND)lParam, hintingEditData->hintText);
-						}
-						hintingEditData->hasFocus = FALSE;
-					}
-					break;
-				}
-
-			}
 			break;
+
 		case IDC_TAB_ACCOUNTS:
 		case IDC_TAB_ADD:
 		case IDC_TAB_SCAN:
@@ -1907,6 +1881,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDC_SCAN:
 			RunScan();
+		case IDOK:
+			if (activeTab == IDC_TAB_ACCOUNTS && GetFocus() == accountSearchEdit) {
+				char codeUtf8[50] = { 0 };
+				uint32_t millisPerCode, millisIntoCode;
+				get_code(0, (uint8_t*)codeUtf8, sizeof(codeUtf8), &millisPerCode, &millisIntoCode);
+
+				CopyAsciiToClipboard(codeUtf8);
+				memcpy(copiedCodeUtf8, codeUtf8, sizeof(copiedCodeUtf8));
+				copiedFromItem = COPIED_USING_KEYBOARD;
+				selectedItem = COPIED_USING_KEYBOARD;
+				InvalidateRect(mainWnd, NULL, FALSE);
+			}
+			break;
 		default:
 			return DefWindowProc(hWnd, message, wParam, lParam);
 		}
@@ -2061,10 +2048,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			HDC hdc = (HDC)wParam;
 			HWND wnd = (HWND)lParam;
 
-			HintingEditData *hintingEditData = (HintingEditData *)GetWindowLongPtr(wnd, GWLP_USERDATA);
-			if (hintingEditData && hintingEditData->showingHint) {
-				SetTextColor(hdc, RGB(200,200,200));
-			}
 			SetBkColor((HDC)wParam, RGB(255, 255, 255));
 			return ret;
 		}
@@ -2128,14 +2111,11 @@ INT_PTR CALLBACK SetPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 		HDC hdc = BeginPaint(hDlg, &ps);
 
 		WINDOWPLACEMENT p = { 0 };
-		RECT dlgRect;
-		GetClientRect(hDlg, &dlgRect);
 		RECT editAreas[2];
 		for (int i = 0; i < 2; i++) {
 			HWND edit = GetDlgItem(hDlg, IDC_PASSWORD_1 + i);
 			GetWindowPlacement(edit, &p);
 			editAreas[i] = p.rcNormalPosition;
-			//InflateRect(&editAreas[i], 4, 4);
 		}
 
 		PaintEdits(hdc, editAreas, 2);
@@ -2193,16 +2173,10 @@ INT_PTR CALLBACK EnterPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM
 		HDC hdc = BeginPaint(hDlg, &ps);
 
 		WINDOWPLACEMENT p = { 0 };
-		RECT dlgRect;
-		GetClientRect(hDlg, &dlgRect);
-		RECT editAreas[2];
-		for (int i = 0; i < 1; i++) {
-			HWND edit = GetDlgItem(hDlg, IDC_PASSWORD_1 + i);
-			GetWindowPlacement(edit, &p);
-			editAreas[i] = p.rcNormalPosition;
-		}
+		HWND edit = GetDlgItem(hDlg, IDC_PASSWORD_1);
+		GetWindowPlacement(edit, &p);
 
-		PaintEdits(hdc, editAreas, 2);
+		PaintEdits(hdc, &p.rcNormalPosition, 1);
 		EndPaint(hDlg, &ps);
 	}
 	case WM_CTLCOLORSTATIC:
