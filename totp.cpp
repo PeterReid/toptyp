@@ -1078,6 +1078,7 @@ void InitScanTab()
 		textBoxHeight * 2, mainWnd, (HMENU)NULL, hInst, 0);
 	SetWindowSubclass(scanTab.status, StaticLabelProc, 0, 0);
 
+	SetFocus(scanTab.scan);
 }
 
 void DestroyScanTab()
