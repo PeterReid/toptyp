@@ -641,10 +641,10 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
-void ReportError(uint32_t err, WCHAR* message)
+void ReportError(HWND parent, uint32_t err, WCHAR* message)
 {
 	if (err) {
-		MessageBoxW(mainWnd, message, L"Error", MB_ICONERROR);
+		MessageBoxW(parent, message, L"Error", MB_ICONERROR);
 	}
 }
 
@@ -1714,7 +1714,7 @@ void ExportUnencryptedToFile()
 {
 	WCHAR szPath[MAX_PATH] = L"";
 	if (!GetFilePath(true, szPath)) return;
-	ReportError(export_to_file_on_windows((uint16_t*)szPath), L"Export failed.");
+	ReportError(mainWnd, export_to_file_on_windows((uint16_t*)szPath), L"Export failed.");
 }
 
 void ExportEncryptedToFile()
@@ -1727,7 +1727,7 @@ void ExportEncryptedToFile()
 	uint8_t passwordUtf8[512];
 	WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
 
-	ReportError(export_to_encrypted_file_on_windows((uint16_t*)szPath, passwordUtf8), L"Export failed.");
+	ReportError(mainWnd, export_to_encrypted_file_on_windows((uint16_t*)szPath, passwordUtf8), L"Export failed.");
 	ZeroMemory(passwordWindowBuf, sizeof(passwordWindowBuf));
 }
 
@@ -1738,7 +1738,7 @@ void ExportEncryptedToClipboard()
 	uint8_t passwordUtf8[512];
 	WideCharToMultiByte(CP_UTF8, 0, passwordWindowBuf, -1, (char*)passwordUtf8, sizeof(passwordUtf8), 0, 0);
 
-	ReportError(export_encrypted_to_clipboard(passwordUtf8), L"Export failed.");
+	ReportError(mainWnd, export_encrypted_to_clipboard(passwordUtf8), L"Export failed.");
 	ZeroMemory(passwordWindowBuf, sizeof(passwordWindowBuf));
 }
 
@@ -1752,7 +1752,7 @@ void ImportFromClipboard()
 		if (DialogBox(hInst, MAKEINTRESOURCE(IDD_ENTER_PASSWORD), mainWnd, EnterPasswordDlg) != IDOK) return;
 	}
 	else {
-		ReportError(err, L"Import failed");
+		ReportError(mainWnd, err, L"Import failed");
 	}
 	InvalidateAboveToolbar();
 }
@@ -1771,7 +1771,7 @@ void ImportFromFile()
 		if (DialogBox(hInst, MAKEINTRESOURCE(IDD_ENTER_PASSWORD), mainWnd, EnterPasswordDlg) != IDOK) return;
 	}
 	else {
-		ReportError(err, L"Import failed.");
+		ReportError(mainWnd, err, L"Import failed.");
 	}
 	InvalidateAboveToolbar();
 }
@@ -2194,7 +2194,7 @@ INT_PTR CALLBACK EnterPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM
 
 				uint32_t err = import_retry(passwordUtf8);
 				if (err != 0) {
-					ReportError(err, L"Import failed");
+					ReportError(hDlg, err, L"Import failed");
 					SetFocus(GetDlgItem(hDlg, IDC_PASSWORD_1));
 					return (INT_PTR)TRUE;
 				}
