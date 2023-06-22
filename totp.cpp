@@ -175,7 +175,7 @@ int ButtonLineWeight(int bottom) {
 	return bottom/12 & ~1;
 }
 
-void DrawButtonBackground(HDC hdc, RECT r, LPCTSTR text, COLORREF textColor) {
+void DrawButtonBackground(HDC hdc, RECT r, LPCTSTR text, COLORREF textColor, bool focused) {
 	HBRUSH br = CreateSolidBrush(RGB(230,230,230));
 	FillRect(hdc, &r, br);
 			
@@ -189,10 +189,18 @@ void DrawButtonBackground(HDC hdc, RECT r, LPCTSTR text, COLORREF textColor) {
 	DrawText(hdc, text, -1, &textRect, DT_SINGLELINE|DT_CENTER|DT_BOTTOM);
 	SetTextColor(hdc, oldColor);
 
+
+	if (focused) {
+		RECT focusRect = r;
+		InflateRect(&focusRect, -sizeBasis / 4, -sizeBasis / 4);
+		DrawFocusRect(hdc, &focusRect);
+	}
+
 	HBRUSH topLineBrush = CreateSolidBrush(RGB(200,200,200));
 	SelectObject(hdc, topLineBrush);
 	r.bottom = r.top + 1;
 	FillRect(hdc, &r, topLineBrush);
+
 
 	SelectObject(hdc, oldObj);
 
@@ -255,7 +263,7 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			}
 
-			DrawButtonBackground(hdc, r, L"Scan", foreground);
+			DrawButtonBackground(hdc, r, L"Scan", foreground, GetFocus()==hWnd);
 			StretchBlt(hdc, r.right/2 - qrScale * qrHeight / 2, qrMiddle - qrHeight*qrScale/2, qrScale*qrHeight, qrScale*qrHeight, bmpDc, 0,0, qrHeight, qrHeight, SRCCOPY);
 
 			DeleteDC(bmpDc);
@@ -285,7 +293,7 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			RECT r;
 			GetClientRect(hWnd, &r);
-			DrawButtonBackground(hdc, r, L"Add", foreground);
+			DrawButtonBackground(hdc, r, L"Add", foreground, GetFocus()==hWnd);
 			
 			int thickness = ButtonLineWeight(r.bottom);
 			int plusMiddleX = r.right / 2;
@@ -386,7 +394,7 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_ACCOUNTS);
 			RECT r;
 			GetClientRect(hWnd, &r);
-			DrawButtonBackground(hdc, r, L"Accounts", foreground);
+			DrawButtonBackground(hdc, r, L"Accounts", foreground, GetFocus()==hWnd);
 			
 			int itemHeight = ButtonLineWeight(r.bottom);
 			int itemLeft = (r.right - r.left)/2 - (r.right - r.left) / 9;
@@ -451,10 +459,14 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			COLORREF foreground = enabled ? RGB(255,255,255) : RGB(150, 150, 150);
 			COLORREF background = enabled ? RGB(240, 30, 30) : RGB(200, 200, 200);
+			COLORREF border = background;
+			if (GetFocus() == hWnd) {
+				border = enabled ? RGB(100, 0, 0) : RGB(150, 150, 150);
+			}
 			int radius = sizeBasis/3;
 
 
-			HBITMAP corners = CreateRoundedCorner(hdc, background, background, RGB(255,255,255), radius);
+			HBITMAP corners = CreateRoundedCorner(hdc, background, border, RGB(255,255,255), radius);
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
 			SelectObject(cornersDC, corners);
@@ -477,19 +489,28 @@ LRESULT CALLBACK SaveButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			DrawText(hdc, textBuf, -1, &r, DT_SINGLELINE|DT_CENTER|DT_VCENTER);
 			SelectObject(hdc, oldFont);
 
-			/*if (GetFocus() == hWnd) {
-				RECT textRect = r;
-				DrawText(hdc, L"Save", -1, &textRect, DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_CALCRECT);
+			if (GetFocus() == hWnd) {
+				HBRUSH borderBrush = CreateSolidBrush(border);
+				RECT borderLine = r;
+				borderLine.left += radius;
+				borderLine.right -= radius;
+				borderLine.bottom = borderLine.top + 1;
+				FillRect(hdc, &borderLine, borderBrush);
 
-				HBRUSH whiteBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
-				int textWidth = textRect.right - textRect.left;
-				RECT underlineRect;
-				underlineRect.left = (r.left + r.right - textWidth) / 2;
-				underlineRect.right = underlineRect.left + textWidth;
-				underlineRect.top = textRect.bottom + 1;
-				underlineRect.bottom = underlineRect.top + 1;
-				FillRect(hdc, &underlineRect, whiteBrush);
-			}*/
+				borderLine.top = r.bottom - 1;
+				borderLine.bottom = r.bottom;
+				FillRect(hdc, &borderLine, borderBrush);
+
+				borderLine = r;
+				borderLine.top += radius;
+				borderLine.bottom -= radius;
+				borderLine.right = borderLine.left + 1;
+				FillRect(hdc, &borderLine, borderBrush);
+
+				borderLine.left = r.right - 1;
+				borderLine.right = r.right;
+				FillRect(hdc, &borderLine, borderBrush);
+			}
 
 			DeleteDC(cornersDC);
 			DeleteObject(corners);
@@ -826,7 +847,17 @@ void InitAddTab()
 	addAccountTab.codeEdit = CreateHintingEdit(addAccountTab.codeEditArea, IDC_CODE, L"e.g. L9WPBRYZLHALSNMW");
 
 	addAccountTab.advancedMode = false;
-	
+
+	RECT advancedButtonRect;
+	advancedButtonRect.right = mainRect.right / 2 + sizeBasis * 7;
+	advancedButtonRect.left = mainRect.right / 2 - sizeBasis * 7;
+	advancedButtonRect.top = componentTop + (componentBottom - componentTop) * 2 / 5 + componentPlacementFromTop;
+	advancedButtonRect.bottom = advancedButtonRect.top + sizeBasis * 5 / 2;
+
+	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_CHILD | ES_AUTOHSCROLL | WS_TABSTOP | WS_GROUP, advancedButtonRect.left, advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left, advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
+	SetWindowText(addAccountTab.advancedButton, L"Show Advanced Options");
+	SetWindowSubclass(addAccountTab.advancedButton, SaveButtonProc, 0, 0);
+
 	
 	int saveButtonWidth = sizeBasis * 8;
 	RECT saveButtonRect = addAccountTab.codeEditArea;
@@ -837,16 +868,6 @@ void InitAddTab()
 	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
 	SetWindowText(addAccountTab.saveButton, L"Save");
 	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
-
-	RECT advancedButtonRect;
-	advancedButtonRect.right = mainRect.right/2 + sizeBasis*7;
-	advancedButtonRect.left = mainRect.right/2 - sizeBasis*7;
-	advancedButtonRect.top = componentTop + (componentBottom - componentTop) * 2 / 5 + componentPlacementFromTop;
-	advancedButtonRect.bottom = advancedButtonRect.top + sizeBasis*5/2;
-
-	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, advancedButtonRect.left,advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left,advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
-	SetWindowText(addAccountTab.advancedButton, L"Show Advanced Options");
-	SetWindowSubclass(addAccountTab.advancedButton, SaveButtonProc, 0, 0);
 
 	WCHAR *labels[] = {
 		L"Account Name",
@@ -1255,14 +1276,16 @@ static int ListItemHeight() {
 RECT codeHitArea = { 0 };
 POINT mousePoint = { 0 };
 
-HCURSOR setCursorTo = 0;
 bool UpdateMouseCursor() {
 	if (activeTab == IDC_TAB_ACCOUNTS) {
-		HCURSOR targetCursor = selectedItem >= 0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor;
-		if (targetCursor != setCursorTo) {
-			SetCursor(targetCursor);
-			setCursorTo = targetCursor;
+		GetCursorPos(&mousePoint);
+		ScreenToClient(mainWnd, &mousePoint);
+		if (PtInRect(&editArea, mousePoint)) {
+			return false;
 		}
+
+		HCURSOR targetCursor = selectedItem >= 0 && PtInRect(&codeHitArea, mousePoint) ? handCursor : arrowCursor;
+		SetCursor(targetCursor);
 		return true;
 	}
 	return false;
