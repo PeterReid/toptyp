@@ -30,8 +30,8 @@
 #define IDM_IMPORT_FROM_FILE            125
 #define IDR_MAINFRAME                   128
 #define IDD_SET_PASSWORD                129
-#define IDD_SET_PASSWORD1               130
 #define IDD_ENTER_PASSWORD              130
+#define IDM_PRINT						131
 #define IDC_PASSWORD_1                  1000
 #define IDC_PASSWORD_2                  1001
 #define IDC_STATIC                      -1

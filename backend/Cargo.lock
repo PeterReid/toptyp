@@ -58,6 +58,7 @@ dependencies = [
  "dirs",
  "once_cell",
  "percent-encoding",
+ "qrcode",
  "quircs",
  "totp-lite",
  "url",
@@ -134,6 +135,12 @@ dependencies = [
  "poly1305",
  "zeroize",
 ]
+
+[[package]]
+name = "checked_int_cast"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17cc5e6b5ab06331c33589842070416baa137e8b0eb912b008cfd4a78ada7919"
 
 [[package]]
 name = "cipher"
@@ -463,9 +470,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5b09efe9b8aa5d34d310a0bfd76122cd6f7d0c91016a5fe928635eab033eb8a"
+dependencies = [
+ "checked_int_cast",
+]
+
+[[package]]
 name = "quircs"
-version = "0.10.0"
-source = "git+https://github.com/PeterReid/quircs#c36f73754e1ede1736ad2d7f4fae80db073eb735"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66a4a2aa9fe525f10ce4ee99dbb78dc3faf31bd0667d50729a6c0eb89e17eca5"
 dependencies = [
  "num-derive",
  "num-traits",

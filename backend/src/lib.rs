@@ -17,6 +17,8 @@ use std::fs::{OpenOptions, remove_file, rename};
 use std::io::Write;
 use std::ops::DerefMut;
 use std::collections::HashSet;
+use qrcode::QrCode;
+use qrcode::types::Color;
 
 use arboard::Clipboard;
 
@@ -99,6 +101,7 @@ enum TotpError {
     UndersizedBuffer = 23,
     UnsupportedBufferSize = 24,
     MalformedSearchQuery = 25,
+    TooLargeForQrCode = 26,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -219,6 +222,23 @@ impl Account {
             self.digits,
             self.period)
     }
+    
+    fn to_qr_bits(&self) -> Result<(u32, Vec<u8>), TotpError> {
+        let url = self.to_url();
+        
+        let bits: Vec<u8> = QrCode::new(url.as_bytes()).map_err(|_| TotpError::TooLargeForQrCode)?.into_colors()
+            .into_iter()
+            .map(|color| match color { Color::Dark => 1, Color::Light => 0 })
+            .collect();
+        
+        println!("len = {}", bits.len());
+        let side_len = ((bits.len() as f64).sqrt() + 0.1) as usize;
+        if side_len*side_len != bits.len() {
+            return Err(TotpError::InternalError);
+        }
+        
+        Ok( (side_len as u32, bits) )
+    }
 }
 
 fn write_to_buffer(dest: &mut [u8], value: &str) -> Result<(), TotpError> {
@@ -319,6 +339,29 @@ fn get_account_name_inner(index: u32, dest: *mut u8, dest_len: u32) -> Result<()
     let account = get_account_by_index(&mut accounts, index)?;
     
     write_to_buffer(dest, account.name.as_str())?;
+    Ok( () )
+}
+
+#[no_mangle]
+pub extern "C" fn get_account_qr_code(index: u32, dest: *mut u8, dest_len: u32, side_len: *mut u32) -> u32 {
+    result_to_error_code(get_account_qr_code_inner(index, dest, dest_len, side_len))
+}
+
+fn get_account_qr_code_inner(index: u32, dest: *mut u8, dest_len: u32, side_len_ptr: *mut u32) -> Result<(), TotpError> {
+    let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
+    let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
+    let account = get_account_by_index(&mut accounts, index)?;
+    let (side_len, qr_bits) = account.to_qr_bits()?;
+    
+    if dest.len() < qr_bits.len() {
+        return Err(TotpError::UndersizedBuffer);
+    }
+    
+    unsafe {
+        *side_len_ptr = side_len as u32;
+    }
+    dest[..qr_bits.len()].copy_from_slice(&qr_bits);
+    
     Ok( () )
 }
 
@@ -799,7 +842,15 @@ fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
         }
     }
     
-    base32::decode(base32::Alphabet::RFC4648{padding: false}, &base32_chars)
+    let bs = base32::decode(base32::Alphabet::RFC4648{padding: false}, &base32_chars)?;
+    if bs.len() < 79 {
+        // Encrypting an empty string gives a 79-byte result, so anything shorter than
+        // that is not a ciphertext. If the user has a number or an empty string
+        // on their clipboard, it would pass the ciphertext checks above (since those
+        // are base32 characters) and would confusingly give them the password prompt.
+        return None;
+    }
+    Some(bs)
 }
 
 fn import_plaintext(plaintext: &str) -> Result<(), TotpError> {
@@ -935,6 +986,14 @@ fn encryption_round_trip() {
     assert_eq!(plaintext, plaintext_again);
     
     assert!(decrypt(&ciphertext_bytes, "wrong password").is_err());
+}
+
+#[test]
+fn qrgen() {
+    let account = Account::from_url("otpauth://totp/ACME%20Co:john.doe@email.com?secret=HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ&algorithm=SHA1&digits=6&period=30").unwrap();
+    
+    println!("{:?}", account.to_qr_bits());
+    panic!("tood")
 }
 
 #[test]

@@ -46,6 +46,7 @@ extern "C" {
 	uint32_t load_accounts();
 	uint32_t accounts_len();
 	uint32_t get_account_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
+	uint32_t get_account_qr_code(uint32_t index, uint8_t* dest, uint32_t dest_len, uint32_t* side_len);
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
 	uint32_t delete_account(uint32_t index);
@@ -694,7 +695,7 @@ LRESULT CALLBACK StaticLabelProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			SetTextColor(hdc, RGB(240,30,30));
 			SetBkMode(hdc, TRANSPARENT);
 			WCHAR labelText[256];
-			GetWindowText(hWnd, labelText, sizeof(labelText));
+			GetWindowText(hWnd, labelText, sizeof(labelText)/sizeof(WCHAR));
 			DrawText(hdc, labelText, -1, &r, DT_WORDBREAK|DT_LEFT|DT_NOPREFIX);
 			SelectObject(hdc, oldFont);
 
@@ -1830,6 +1831,128 @@ void UpdateSelectionForMousePoint()
 	}
 }
 
+void Print()
+{
+	PRINTDLG pd;
+
+	// Initialize PRINTDLG
+	ZeroMemory(&pd, sizeof(pd));
+	pd.lStructSize = sizeof(pd);
+	pd.hwndOwner = mainWnd;
+	pd.hDevMode = NULL;     // Don't forget to free or store hDevMode.
+	pd.hDevNames = NULL;     // Don't forget to free or store hDevNames.
+	pd.Flags = PD_USEDEVMODECOPIESANDCOLLATE | PD_RETURNDC | PD_NOSELECTION | PD_NOPAGENUMS;
+	pd.nCopies = 1;
+	pd.nFromPage = 0xFFFF;
+	pd.nToPage = 0xFFFF;
+	pd.nMinPage = 1;
+	pd.nMaxPage = 0xFFFF;
+
+	if (!PrintDlg(&pd)) return;
+
+	DOCINFO di = { sizeof(DOCINFO), L"My Document" };
+
+	HDC dc = pd.hDC;
+
+
+	int pageWidth = GetDeviceCaps(pd.hDC, PHYSICALWIDTH);
+	int dpiX = GetDeviceCaps(pd.hDC, LOGPIXELSX);
+	int pageHeight = GetDeviceCaps(pd.hDC, PHYSICALHEIGHT);
+	int dpiY = GetDeviceCaps(pd.hDC, LOGPIXELSY);
+
+	int qrDotWidth = dpiX * 2;
+	int	qrDotHeight = dpiY * 2;
+
+	int pageXMargin = dpiX;
+	int pageYMargin = dpiY;
+
+	int qrXMargin = dpiX / 2;
+	int qrYMargin = dpiY / 2;
+	int textBelowQr = dpiY / 8;
+
+	int columns = (pageWidth - pageXMargin*2) / (qrDotWidth + qrXMargin * 2);
+	int rows = (pageHeight - pageYMargin * 2) / (qrDotHeight + qrYMargin * 2);
+
+	HFONT font = CreateFont(dpiY/4, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FF_MODERN, L"Segoe UI");
+	SelectObject(dc, font);
+
+	uint8_t qrBuf[80 * 80];
+
+	int row = 0;
+	int col = 0;
+	if (StartDoc(pd.hDC, &di) > 0) {
+		bool pageNeeded = true;
+		uint32_t nAccounts = accounts_len();
+		for (uint32_t accountIdx = 0; accountIdx < nAccounts; accountIdx++) {
+			if (pageNeeded) {
+				if (accountIdx) {
+					EndPage(dc);
+				}
+				StartPage(pd.hDC);
+				pageNeeded = false;
+			}
+			
+			WCHAR accountNameBuf[256];
+			uint8_t accountNameUtf8[256];
+			if (get_account_name(accountIdx, accountNameUtf8, sizeof(accountNameUtf8))) break;
+
+			MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS | MB_USEGLYPHCHARS, (const char*)accountNameUtf8, sizeof(accountNameUtf8) / sizeof(*accountNameUtf8), accountNameBuf, sizeof(accountNameBuf) / sizeof(*accountNameBuf));
+
+
+			uint32_t qrSize = 0;
+			uint32_t ret = get_account_qr_code(accountIdx, qrBuf, sizeof(qrBuf), &qrSize);
+			if (ret == 0) {
+				int qrTop = pageYMargin + qrYMargin + row * (qrDotHeight + qrYMargin * 2);
+				int qrLeft = pageXMargin + qrXMargin + col * (qrDotWidth + qrXMargin * 2);
+				int qrBottom = qrTop + qrDotHeight;
+				int qrRight = qrLeft + qrDotWidth;
+
+				RECT r;
+				SetRect(&r, qrLeft - qrXMargin, qrBottom + textBelowQr, qrRight + qrXMargin, qrBottom + dpiY);
+				DrawText(dc, accountNameBuf, -1, &r, DT_NOPREFIX | DT_CENTER | DT_TOP | DT_SINGLELINE);
+				//TextOut(dc, 1000, 1000, L"Test 2", 6);
+				int qrPixelSize = 100;
+				HBRUSH whiteBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
+				HBRUSH blackBrush = (HBRUSH)GetStockObject(BLACK_BRUSH);
+				for (uint32_t qrX = 0; qrX < qrSize; qrX++) {
+					for (uint32_t qrY = 0; qrY < qrSize; qrY++) {
+						RECT r;
+						int pixelX = qrLeft + qrDotWidth * qrX / qrSize;
+						int pixelY = qrTop + qrDotHeight * qrY / qrSize;
+						int nextPixelX = qrLeft + qrDotWidth * (qrX + 1) / qrSize;
+						int nextPixelY = qrTop + qrDotHeight * (qrY + 1) / qrSize;
+
+						SetRect(&r, pixelX, pixelY, nextPixelX - 1, nextPixelY - 1);
+
+						bool filled = qrBuf[qrX + qrY * qrSize];// (qrX * 1243 + qrY * 34) % 7 > 3;
+
+						if (filled) {
+							FillRect(dc, &r, filled ? blackBrush : whiteBrush);
+						}
+					}
+				}
+
+				col++;
+				if (col == columns) {
+					col = 0;
+					row++;
+					if (row == rows) {
+						row = 0;
+						pageNeeded = true;
+					}
+				}
+			}
+		}
+
+		EndPage(pd.hDC);
+		EndDoc(pd.hDC);
+
+	}
+	// Delete DC when done.
+	DeleteDC(pd.hDC);
+	
+}
+
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -1859,6 +1982,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_EXIT:
 			DestroyWindow(hWnd);
+			break;
+		case IDM_PRINT:
+			Print();
 			break;
 		case IDM_EXPORT_ENCRYPTED_TO_FILE:
 			ExportEncryptedToFile();
