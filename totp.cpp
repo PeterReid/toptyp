@@ -641,7 +641,7 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			SetTextColor(hdc, foreground);
 			SetBkMode(hdc, TRANSPARENT);
 			WCHAR labelText[256];
-			GetWindowText(hWnd, labelText, sizeof(labelText));
+			GetWindowText(hWnd, labelText, sizeof(labelText)/sizeof(WCHAR));
 			DrawText(hdc, labelText, -1, &r, DT_SINGLELINE|DT_CENTER|DT_VCENTER);
 			SelectObject(hdc, oldFont);
 
