@@ -641,7 +641,7 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			SetTextColor(hdc, foreground);
 			SetBkMode(hdc, TRANSPARENT);
 			WCHAR labelText[256];
-			GetWindowText(hWnd, labelText, sizeof(labelText)/sizeof(WCHAR));
+			GetWindowText(hWnd, labelText, sizeof(labelText)/ sizeof(WCHAR));
 			DrawText(hdc, labelText, -1, &r, DT_SINGLELINE|DT_CENTER|DT_VCENTER);
 			SelectObject(hdc, oldFont);
 
@@ -1850,7 +1850,7 @@ void Print()
 
 	if (!PrintDlg(&pd)) return;
 
-	DOCINFO di = { sizeof(DOCINFO), L"My Document" };
+	DOCINFO di = { sizeof(DOCINFO), L"Toptyp Secrets" };
 
 	HDC dc = pd.hDC;
 
@@ -1899,6 +1899,10 @@ void Print()
 			MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS | MB_USEGLYPHCHARS, (const char*)accountNameUtf8, sizeof(accountNameUtf8) / sizeof(*accountNameUtf8), accountNameBuf, sizeof(accountNameBuf) / sizeof(*accountNameBuf));
 
 
+			HBRUSH whiteBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
+			HBRUSH blackBrush = (HBRUSH)GetStockObject(BLACK_BRUSH);
+
+			SelectObject(dc, blackBrush);
 			uint32_t qrSize = 0;
 			uint32_t ret = get_account_qr_code(accountIdx, qrBuf, sizeof(qrBuf), &qrSize);
 			if (ret == 0) {
@@ -1910,27 +1914,60 @@ void Print()
 				RECT r;
 				SetRect(&r, qrLeft - qrXMargin, qrBottom + textBelowQr, qrRight + qrXMargin, qrBottom + dpiY);
 				DrawText(dc, accountNameBuf, -1, &r, DT_NOPREFIX | DT_CENTER | DT_TOP | DT_SINGLELINE);
-				//TextOut(dc, 1000, 1000, L"Test 2", 6);
-				int qrPixelSize = 100;
-				HBRUSH whiteBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
-				HBRUSH blackBrush = (HBRUSH)GetStockObject(BLACK_BRUSH);
+				
+				// Drawing lots of squares leads to little visible gaps between them.
+				// To avoid that, we draw horizontal and vertical stripes along columns
+				// and then rows.
 				for (uint32_t qrX = 0; qrX < qrSize; qrX++) {
-					for (uint32_t qrY = 0; qrY < qrSize; qrY++) {
-						RECT r;
-						int pixelX = qrLeft + qrDotWidth * qrX / qrSize;
-						int pixelY = qrTop + qrDotHeight * qrY / qrSize;
-						int nextPixelX = qrLeft + qrDotWidth * (qrX + 1) / qrSize;
-						int nextPixelY = qrTop + qrDotHeight * (qrY + 1) / qrSize;
+					int pixelX = qrLeft + qrDotWidth * qrX / qrSize;
+					int nextPixelX = qrLeft + qrDotWidth * (qrX + 1) / qrSize;
 
-						SetRect(&r, pixelX, pixelY, nextPixelX - 1, nextPixelY - 1);
-
-						bool filled = qrBuf[qrX + qrY * qrSize];// (qrX * 1243 + qrY * 34) % 7 > 3;
+					int filledStartY = -1;
+					for (uint32_t qrY = 0; qrY < qrSize+1; qrY++) {
+						bool filled = qrY < qrSize && qrBuf[qrX + qrY * qrSize];
 
 						if (filled) {
-							FillRect(dc, &r, filled ? blackBrush : whiteBrush);
+							if (filledStartY == -1) filledStartY = qrY;
+						}
+						else if (filledStartY != -1) {
+							RECT r;
+							int pixelY = qrTop + qrDotHeight * filledStartY / qrSize;
+							int nextPixelY = qrTop + qrDotHeight * qrY / qrSize;
+
+							SetRect(&r, pixelX, pixelY, nextPixelX, nextPixelY);
+
+							FillRect(dc, &r, blackBrush);
+							
+							filledStartY = -1;
 						}
 					}
 				}
+
+				for (uint32_t qrY = 0; qrY < qrSize; qrY++) {
+					int pixelY = qrTop + qrDotHeight * qrY / qrSize;
+					int nextPixelY = qrTop + qrDotHeight * (qrY + 1) / qrSize;
+
+					int filledStartX = -1;
+					for (uint32_t qrX = 0; qrX < qrSize + 1; qrX++) {
+						bool filled = qrX < qrSize && qrBuf[qrX + qrY * qrSize];
+
+						if (filled) {
+							if (filledStartX == -1) filledStartX = qrX;
+						}
+						else if (filledStartX != -1) {
+							RECT r;
+							int pixelX = qrLeft + qrDotWidth * filledStartX / qrSize;
+							int nextPixelX = qrLeft + qrDotWidth * qrX / qrSize;
+
+							SetRect(&r, pixelX, pixelY, nextPixelX, nextPixelY);
+
+							FillRect(dc, &r, blackBrush);
+
+							filledStartX = -1;
+						}
+					}
+				}
+
 
 				col++;
 				if (col == columns) {
