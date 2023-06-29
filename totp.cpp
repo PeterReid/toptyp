@@ -1615,7 +1615,6 @@ void EditAccount(int idx, bool fromScanResults)
 	MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS|MB_USEGLYPHCHARS, (const char *)codeUtf8, sizeof(codeUtf8)/sizeof(*codeUtf8), codeBuf, sizeof(codeBuf)/sizeof(*codeBuf));
 
 	SetActiveTab(fromScanResults ? IDC_TAB_ADD : IDC_TAB_EDIT, false);
-
 	SetWindowText(addAccountTab.nameEdit, nameBuf);
 	SetWindowText(addAccountTab.codeEdit, codeBuf);
 	if (fromScanResults) {
@@ -1699,6 +1698,7 @@ void RunScan()
 
 	if (results == 1) {
 		EditAccount(0, true);
+		return;
 	}
 
 	WCHAR status[256];
@@ -1710,9 +1710,6 @@ void RunScan()
 	SetWindowTextW(scanTab.status, status);
 	InvalidateRect(scanTab.status, NULL, FALSE);
 
-	if (results == 1) {
-		EditAccount(0, true);
-	}
 	/*
 	if (results) {
 		uint8_t name[256];
