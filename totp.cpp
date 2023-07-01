@@ -1653,8 +1653,6 @@ void RunScan()
 
 	SelectObject(hMemoryDC, hBitmap);
 	BitBlt(hMemoryDC,0,0,width,height,hScreenDC,0,0,SRCCOPY|CAPTUREBLT);
-	COLORREF s = GetPixel(hScreenDC, 0, 0);
-	COLORREF b = GetPixel(hMemoryDC, 0, 0);
 
 	BITMAPINFO info = {0};
 	info.bmiHeader.biSize = sizeof(info.bmiHeader);
@@ -1667,7 +1665,6 @@ void RunScan()
 	uint32_t* rgbs = (uint32_t*)GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, info.bmiHeader.biSizeImage);
 	uint8_t *grays = (uint8_t *)GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, pixels);
 	if (!rgbs || !grays) {
-		// TODO: Nice error message
 		GlobalFree(rgbs);
 		GlobalFree(grays);
 		return;
@@ -1682,42 +1679,31 @@ void RunScan()
 			grays[x + y*width] = ((rgb & 0xff) + ((rgb >> 8) & 0xff) + ((rgb >> 16) & 0xff)) / 3;
 		}
 	}
-	scan(grays, info.bmiHeader.biWidth, info.bmiHeader.biHeight);
-	
-	hBitmap = static_cast<HBITMAP>(SelectObject(hMemoryDC,hOldBitmap));
+	int err = scan(grays, info.bmiHeader.biWidth, info.bmiHeader.biHeight);
+	if (err) {
+		ReportError(mainWnd, err, L"Scan failed");
+		return;
+	}
+	SelectObject(hMemoryDC, hOldBitmap);
 	DeleteDC(hMemoryDC);
 	DeleteDC(hScreenDC);
 	GlobalFree(rgbs);
 	GlobalFree(grays);
-
-
-
 	DeleteObject(hBitmap);
 
 	uint32_t results = scan_result_count();
 
-	if (results == 1) {
-		EditAccount(0, true);
-		return;
-	}
-
 	WCHAR status[256];
 	if (results == 0) {
 		wcscpy_s(status, L"No QR codes found.");
+	} else if (results == 1) {
+		EditAccount(0, true);
+		return;
 	} else {
-		swprintf_s(status, L"Account %d of %d:", (int)1, (int)results);
+		wcscpy_s(status, L"Multiple QR codes found. Please make sure just one is on your screen.");
 	}
 	SetWindowTextW(scanTab.status, status);
 	InvalidateRect(scanTab.status, NULL, FALSE);
-
-	/*
-	if (results) {
-		uint8_t name[256];
-		get_scan_result_name(0, name, sizeof(name));
-		strcat((char*)name, "!");
-		add_scan_result(0, name);
-	}*/
-	
 }
 
 bool GetFilePath(bool save, WCHAR szPath[MAX_PATH])
