@@ -214,6 +214,24 @@ COLORREF TabForegroundColor(bool selected)
 	return selected ? RGB(240,30,30) : RGB(0,0,0);
 }
 
+struct TabButtonData {
+	ULONGLONG clickTickCount;
+	ULONGLONG focusTickCount;
+} scanButtonData = { 0 }, addButtonData = { 0 }, accountsButtonData = { 0 };
+
+bool ShouldDrawFocus(HWND wnd, TabButtonData* data)
+{
+	// For a user tabbing through all the controls, it is important to show when the
+	// buttons along the bottom have focus. But for a user clicking on the tab buttons,
+	// focus moves to the when the mouse button goes down on the button and then moves
+	// away when the mouse button comes back up and the new tab control gains focus.
+	// This causes an unsightly flash of the focus indicator. To avoid that, I want to 
+	// hide the focus indicator when the focus is gained through a click. During a click
+	// to focus, there is a WM_LBUTTONDOWN immediately followed by a WM_SETFOCUS. By
+	// tracking the timing of those, we can hide the focus indicator when appropriate.
+	return wnd == GetFocus() && data->focusTickCount - data->clickTickCount > 100;
+}
+
 LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                                LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
 {
@@ -223,6 +241,12 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     {
 	case WM_ERASEBKGND:
 		return TRUE;
+	case WM_SETFOCUS:
+		scanButtonData.focusTickCount = ::GetTickCount64();
+		break;
+	case WM_LBUTTONDOWN:
+		scanButtonData.clickTickCount = ::GetTickCount64();
+		break;
     case WM_PAINT:
 		hdc = BeginPaint(hWnd, &ps);
 		{
@@ -264,7 +288,7 @@ LRESULT CALLBACK ScanButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			}
 
-			DrawButtonBackground(hdc, r, L"Scan", foreground, GetFocus()==hWnd);
+			DrawButtonBackground(hdc, r, L"Scan", foreground, ShouldDrawFocus(hWnd, &scanButtonData));
 			StretchBlt(hdc, r.right/2 - qrScale * qrHeight / 2, qrMiddle - qrHeight*qrScale/2, qrScale*qrHeight, qrScale*qrHeight, bmpDc, 0,0, qrHeight, qrHeight, SRCCOPY);
 
 			DeleteDC(bmpDc);
@@ -285,6 +309,12 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 	HDC hdc;
     switch (uMsg)
     {
+	case WM_SETFOCUS:
+		addButtonData.focusTickCount = ::GetTickCount64();
+		break;
+	case WM_LBUTTONDOWN:
+		addButtonData.clickTickCount = ::GetTickCount64();
+		break;
 	case WM_ERASEBKGND:
 		return TRUE;
     case WM_PAINT:
@@ -294,7 +324,7 @@ LRESULT CALLBACK AddButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			RECT r;
 			GetClientRect(hWnd, &r);
-			DrawButtonBackground(hdc, r, L"Add", foreground, GetFocus()==hWnd);
+			DrawButtonBackground(hdc, r, L"Add", foreground, ShouldDrawFocus(hWnd, &addButtonData));
 			
 			int thickness = ButtonLineWeight(r.bottom);
 			int plusMiddleX = r.right / 2;
@@ -387,6 +417,12 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 	HDC hdc;
     switch (uMsg)
     {
+	case WM_SETFOCUS:
+		accountsButtonData.focusTickCount = ::GetTickCount64();
+		break;
+	case WM_LBUTTONDOWN:
+		accountsButtonData.clickTickCount = ::GetTickCount64();
+		break;
 	case WM_ERASEBKGND:
 		return TRUE;
     case WM_PAINT:
@@ -395,7 +431,7 @@ LRESULT CALLBACK AccountsButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 			COLORREF foreground = TabForegroundColor(activeTab == IDC_TAB_ACCOUNTS);
 			RECT r;
 			GetClientRect(hWnd, &r);
-			DrawButtonBackground(hdc, r, L"Accounts", foreground, GetFocus()==hWnd);
+			DrawButtonBackground(hdc, r, L"Accounts", foreground, ShouldDrawFocus(hWnd, &accountsButtonData));
 			
 			int itemHeight = ButtonLineWeight(r.bottom);
 			int itemLeft = (r.right - r.left)/2 - (r.right - r.left) / 9;
