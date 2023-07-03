@@ -305,6 +305,11 @@ pub extern "C" fn accounts_len() -> u32 {
     SEARCH_RESULTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
 }
 
+#[no_mangle]
+pub extern "C" fn unfiltered_accounts_len() -> u32 {
+    ACCOUNTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
+}
+
 fn result_to_error_code(r: Result<(), TotpError>) -> u32 {
     match r {
         Ok( () ) => 0,

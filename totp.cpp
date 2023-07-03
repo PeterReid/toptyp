@@ -47,6 +47,9 @@ extern "C" {
 	uint32_t accounts_len();
 	uint32_t get_account_name(uint32_t index, uint8_t *dest, uint32_t dest_len);
 	uint32_t get_account_qr_code(uint32_t index, uint8_t* dest, uint32_t dest_len, uint32_t* side_len);
+	
+	uint32_t unfiltered_accounts_len();
+
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
 	uint32_t delete_account(uint32_t index);
@@ -1567,6 +1570,15 @@ void PaintAccounts(HDC hdc)
 		SetRect(&belowList, 0, listY, scrollRect.left, listBottom);
 		FillRect(hdc, &belowList, backgroundBrush);
 	}
+
+	if (account_count == 0) {
+		RECT listRect;
+		SetRect(&listRect, area.left, listTop, scrollRect.left, listBottom);
+		SelectObject(hdc, font);
+		SetTextColor(hdc, RGB(100, 100, 100));
+		DrawText(hdc, unfiltered_accounts_len()==0 ? L"No Accounts" : L"No Matches", -1, & listRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	}
+
 	SelectClipRgn(hdc, NULL);
 
 	DeleteObject(itemDC);
