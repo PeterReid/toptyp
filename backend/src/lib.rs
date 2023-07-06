@@ -343,6 +343,11 @@ pub extern "C" fn get_backup_needed() -> u32 {
 }
 
 #[no_mangle]
+pub extern "C" fn dismiss_backup_reminder() -> u32 {
+    result_to_error_code(record_backup_made())
+}
+
+#[no_mangle]
 pub extern "C" fn accounts_len() -> u32 {
     SEARCH_RESULTS.lock().ok().and_then(|accounts| accounts.len().try_into().ok()).unwrap_or(0)
 }

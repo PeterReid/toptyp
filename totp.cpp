@@ -50,6 +50,7 @@ extern "C" {
 	
 	uint32_t unfiltered_accounts_len();
 	uint32_t get_backup_needed();
+	uint32_t dismiss_backup_reminder();
 
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
@@ -2289,6 +2290,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					}
 				}
 				
+			}
+			else if (activeTab == IDC_TAB_ACCOUNTS && showingBackupReminder) {
+				RECT clientRect;
+				GetClientRect(mainWnd, &clientRect);
+				POINT cursor;
+				::GetCursorPos(&cursor);
+
+				POINT clientCursor = cursor;
+				ScreenToClient(mainWnd, &clientCursor);
+
+				if (clientCursor.y < clientRect.bottom - bottomButtonHeight && clientCursor.y > clientRect.bottom - bottomButtonHeight - sizeBasis * 2) {
+					HMENU menu = CreatePopupMenu();
+					AppendMenu(menu, MF_STRING | MF_ENABLED, 1, L"Dismiss");
+					int ret = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, cursor.x, cursor.y, 0, mainWnd, NULL);
+					if (ret == 1) {
+						dismiss_backup_reminder();
+						InvalidateAboveToolbar();
+					}
+				}
 			}
 		}
 		break;
