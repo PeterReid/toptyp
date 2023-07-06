@@ -1396,9 +1396,16 @@ void PaintAccounts(HDC hdc)
 		listBottom -= sizeBasis * 2;
 	}
 
+
+	
 	int account_count = accounts_len();
 
-	if (account_count != scrollBarIsForAccountCount) {
+	bool resizingScroll = scrollRect.bottom != listBottom;
+	if (resizingScroll) {
+		scrollRect.bottom = listBottom;
+		SetWindowPos(scroll, NULL, scrollRect.left, scrollRect.top, scrollRect.right - scrollRect.left, scrollRect.bottom - scrollRect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+	if (account_count != scrollBarIsForAccountCount || resizingScroll) {
 		scrollBarIsForAccountCount = account_count;
 
 		SCROLLINFO info = { 0 };
@@ -1419,10 +1426,6 @@ void PaintAccounts(HDC hdc)
 			}
 		}
 		SetScrollInfo(scroll, SB_CTL, &info, TRUE);
-	}
-	if (scrollRect.bottom != listBottom) {
-		scrollRect.bottom = listBottom;
-		SetWindowPos(scroll, NULL, scrollRect.left, scrollRect.top, scrollRect.right - scrollRect.left, scrollRect.bottom - scrollRect.top, SWP_NOZORDER);
 	}
 
 
