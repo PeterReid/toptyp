@@ -13,7 +13,7 @@ use std::time::UNIX_EPOCH;
 use url::Url;
 use std::ffi::CStr;
 use totp_lite::totp_custom;
-use std::fs::{OpenOptions, remove_file, rename};
+use std::fs::{OpenOptions, remove_file, rename, create_dir};
 use std::io::Write;
 use std::ops::DerefMut;
 use std::collections::HashSet;
@@ -39,6 +39,7 @@ static SCAN_RESULTS: Lazy<Mutex<Vec<Account>>> = Lazy::new(|| {
     Mutex::new(vec![])
 });
 static IMPORT_CONTENTS: Lazy<Mutex<String>> = Lazy::new(|| { Mutex::new(String::new()) });
+static BACKUP_NEEDED: Lazy<Mutex<bool>> = Lazy::new(|| { Mutex::new(false) });
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 enum Algorithm {
@@ -266,12 +267,20 @@ pub extern "C" fn load_accounts() -> u32 {
 
 fn get_save_file() -> PathBuf {
     let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
-    dir.push("totp.txt");
+    dir.push("toptyp");
+    dir.push("toptyp_accounts.txt");
+    dir
+}
+fn get_backup_needed_file() -> PathBuf {
+    let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
+    dir.push("toptyp");
+    dir.push("backup_needed");
     dir
 }
 fn get_save_temp_file() -> PathBuf {
     let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
-    dir.push("totp.txt.temp");
+    dir.push("toptyp");
+    dir.push("toptyp_accounts.txt.temp");
     dir
 }
 
@@ -292,13 +301,46 @@ fn text_to_accounts(text: &str) -> Result<Vec<Account>, TotpError> {
 fn load_accounts_inner() -> Result<(), TotpError> {
     // TODO: Also try temp path
     let data = file_to_string(&get_save_file())?;
+    let backup_needed = get_backup_needed_file().exists();
+    
     {
         let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
         *accounts.deref_mut() = text_to_accounts(&data)?;
     }
+    
+    {
+        *BACKUP_NEEDED.lock().map_err(|_| TotpError::InternalError)?.deref_mut() = backup_needed;
+    }
     update_search_results()
 }
 
+fn record_backup_needed() -> Result<(), TotpError> {
+    let mut backup_needed = BACKUP_NEEDED.lock().map_err(|_| TotpError::InternalError)?;
+    if *backup_needed.deref_mut() {
+        return Ok( () );
+    }
+    
+    *backup_needed.deref_mut() = true;
+    let path = get_backup_needed_file();
+    if path.exists() {
+        return Ok( () );
+    }
+    
+    let _ = File::create(path).map_err(|_| TotpError::FileWriteError)?;
+
+    Ok( () )
+}
+
+fn record_backup_made() -> Result<(), TotpError> {
+    let mut backup_needed = BACKUP_NEEDED.lock().map_err(|_| TotpError::InternalError)?;
+    *backup_needed.deref_mut() = false;
+    remove_file(&get_backup_needed_file()).map_err(|_| TotpError::FileWriteError)
+}
+
+#[no_mangle]
+pub extern "C" fn get_backup_needed() -> u32 {
+    BACKUP_NEEDED.lock().map(|x| *x).unwrap_or(false) as u32
+}
 
 #[no_mangle]
 pub extern "C" fn accounts_len() -> u32 {
@@ -410,7 +452,7 @@ fn add_account_inner(name: *const u8, code: *const u8, algorithm: u32, digits: u
     let code_str = unsafe { CStr::from_ptr(code as *const i8) };
     
     let account = Account::from_c_params(name_str, code_str, algorithm, digits, period)?;
-    atomic_file_modification(&|mut data: Vec<String>| {
+    atomic_file_modification(true, &|mut data: Vec<String>| {
         data.push(account.to_url());
         Ok( data )
     })?;
@@ -452,7 +494,7 @@ fn delete_account_inner(index: u32) -> Result<(), TotpError> {
         let mut accounts = ACCOUNTS.lock().map_err(|_| TotpError::InternalError)?;
         let target_account = get_account_by_index(&mut accounts, index)?;
         
-        atomic_file_modification(&|mut data: Vec<String>| {
+        atomic_file_modification(false, &|mut data: Vec<String>| {
             if let Some(best_line_idx) = find_account_index(target_account, index, &data) {
                 data.remove(best_line_idx);
                 Ok(data)
@@ -508,7 +550,16 @@ fn file_to_string(path: &Path) -> Result<String, TotpError> {
     String::from_utf8(data_bytes).map_err(|_| TotpError::MalformedFileText)
 }
 
-fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<String>, TotpError>) -> Result<(), TotpError> {
+fn ensure_directory_exists() -> Result<(), TotpError> {
+    let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
+    dir.push("toptyp");
+    if dir.exists() {
+        return Ok( () )
+    }
+    create_dir(dir).map_err(|_| TotpError::FileWriteError)
+}
+
+fn atomic_file_modification(cause_for_backup: bool, modify_data: &dyn Fn(Vec<String>) -> Result<Vec<String>, TotpError>) -> Result<(), TotpError> {
     let temp_file_path = get_save_temp_file();
     let data_file_path = get_save_file();
     
@@ -521,6 +572,8 @@ fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<Stri
         }
     }
     
+    ensure_directory_exists()?;
+    
     let mut temp_file = OpenOptions::new().write(true).create_new(true).open(&temp_file_path).map_err(|_| TotpError::FileWriteError)?;
     let old_data = file_to_string(&data_file_path)?;
     let old_data_lines: Vec<String> = old_data.lines().map(|line| line.trim()).filter(|line| line.len()>0).map(|s| s.to_string()).collect();
@@ -529,6 +582,10 @@ fn atomic_file_modification(modify_data: &dyn Fn(Vec<String>) -> Result<Vec<Stri
     temp_file.write_all(new_data.as_bytes()).map_err(|_| TotpError::FileWriteError)?;
     drop(temp_file);
     rename(temp_file_path, data_file_path).map_err(|_| TotpError::FileWriteError)?;
+    
+    if cause_for_backup && new_data != old_data {
+        record_backup_needed()?;
+    }
     
     Ok( () )
 }
@@ -618,7 +675,7 @@ fn edit_account_inner(index: u32, name: *const u8, code: *const u8, algorithm: u
         
         let target_will_be = Account::from_c_params(name_str, code_str, algorithm, digits, period)?;
 
-        atomic_file_modification(&|mut data: Vec<String>| {
+        atomic_file_modification(true, &|mut data: Vec<String>| {
             let modify_index = if let Some(modify_index) = find_account_index(target_currently_is, index, &data) {
                 modify_index
             } else {
@@ -709,10 +766,9 @@ pub extern "C" fn export_to_encrypted_file_on_windows(path: *const u16, password
 }
 
 fn export_to_file(path: OsString) -> Result<(), TotpError> {
-    let dir = get_save_file();
-    let mut data = Vec::new();
-    File::open(&dir).and_then(|mut f| f.read_to_end(&mut data)).map_err(|_| TotpError::FileReadError)?;
-    File::create(path).and_then(|mut f| f.write_all(&data)).map_err(|_| TotpError::FileWriteError)?;
+    let data = file_to_string(&get_save_file())?;
+    File::create(path).and_then(|mut f| f.write_all(data.as_bytes())).map_err(|_| TotpError::FileWriteError)?;
+    record_backup_made()?;
     Ok( () )
 }
 
@@ -767,6 +823,7 @@ fn encrypt_with_password(password: *const u8) -> Result<String, TotpError> {
 fn export_to_encrypted_file(path: OsString, password: *const u8) -> Result<(), TotpError> {
     let encrypted_text = encrypt_with_password(password)?;
     File::create(path).and_then(|mut f| f.write_all(encrypted_text.as_bytes())).map_err(|_| TotpError::FileWriteError)?;
+    record_backup_made()?;
     Ok( () )
 }
 
@@ -779,6 +836,7 @@ fn export_to_clipboard_inner() -> Result<(), TotpError> {
     let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
     let data = file_to_string(&get_save_file())?;
     clipboard.set_text(data).map_err(|_| TotpError::InternalError)?;
+    record_backup_made()?;
     Ok( () )
 }
 
@@ -791,6 +849,7 @@ fn export_encrypted_to_clipboard_inner(password: *const u8) -> Result<(), TotpEr
     let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
     let encrypted_text = encrypt_with_password(password)?;
     clipboard.set_text(encrypted_text).map_err(|_| TotpError::InternalError)?;
+    record_backup_made()?;
     Ok( () )
 }
 
@@ -860,7 +919,7 @@ fn extract_ciphertext(data: &str) -> Option<Vec<u8>> {
 
 fn import_plaintext(plaintext: &str) -> Result<(), TotpError> {
     let imported_accounts = text_to_accounts(plaintext)?;
-    atomic_file_modification(&|mut data: Vec<String>| {
+    atomic_file_modification(false, &|mut data: Vec<String>| {
         let mut existings = HashSet::new();
         for existing in data.iter() {
             existings.insert(existing.clone());

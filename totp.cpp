@@ -49,6 +49,7 @@ extern "C" {
 	uint32_t get_account_qr_code(uint32_t index, uint8_t* dest, uint32_t dest_len, uint32_t* side_len);
 	
 	uint32_t unfiltered_accounts_len();
+	uint32_t get_backup_needed();
 
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
@@ -76,6 +77,7 @@ HCURSOR handCursor = NULL, arrowCursor = NULL;
 
 RECT editArea;
 RECT scrollRect;
+bool showingBackupReminder = false;
 int sizeBasis = 0;
 int bottomButtonHeight = 0;
 int textBoxHeight = 0;
@@ -781,10 +783,12 @@ void InitAccountsTab()
 	editArea.right = clientRect.right - editMargin;
 	editArea.bottom = editArea.top + textBoxHeight;
 
+	showingBackupReminder = get_backup_needed();
+
 	scrollRect = clientRect;
 	scrollRect.left = scrollRect.right - GetSystemMetrics(SM_CYVSCROLL);
 	scrollRect.top = editArea.bottom + editMargin;
-	scrollRect.bottom -= bottomButtonHeight;
+	scrollRect.bottom -= bottomButtonHeight + (showingBackupReminder ? sizeBasis*2 : 0);
 
 	accountSearchEdit = CreateHintingEdit(editArea, IDC_SEARCH, L"Search...");
    
@@ -1386,6 +1390,10 @@ void PaintAccounts(HDC hdc)
 	int listItemHeight = ListItemHeight();
 	int dividerHeight = sizeBasis/6;
 
+	bool showBackupReminder = get_backup_needed();
+	if (showBackupReminder) {
+		listBottom -= sizeBasis * 2;
+	}
 
 	int account_count = accounts_len();
 
@@ -1410,6 +1418,10 @@ void PaintAccounts(HDC hdc)
 			}
 		}
 		SetScrollInfo(scroll, SB_CTL, &info, TRUE);
+	}
+	if (scrollRect.bottom != listBottom) {
+		scrollRect.bottom = listBottom;
+		SetWindowPos(scroll, NULL, scrollRect.left, scrollRect.top, scrollRect.right - scrollRect.left, scrollRect.bottom - scrollRect.top, SWP_NOZORDER);
 	}
 
 
@@ -1580,6 +1592,19 @@ void PaintAccounts(HDC hdc)
 	}
 
 	SelectClipRgn(hdc, NULL);
+
+	if (showBackupReminder) {
+		HBRUSH reminderBackgroundBrush = CreateSolidBrush(RGB(240, 30, 30));
+		RECT reminderRect = area;
+		reminderRect.top = listBottom;
+		reminderRect.bottom = listBottom + sizeBasis*2;
+		FillRect(hdc, &reminderRect, reminderBackgroundBrush);
+		SetTextColor(hdc, RGB(0, 0, 0));
+		SelectObject(hdc, iconFont);
+		SetBkMode(hdc, TRANSPARENT);
+		DrawText(hdc, L"You have made changes since making a backup.", -1, &reminderRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+		DeleteObject(reminderBackgroundBrush);
+	}
 
 	DeleteObject(itemDC);
 	DeleteObject(itemBmp);
@@ -1771,6 +1796,8 @@ void ExportUnencryptedToFile()
 	WCHAR szPath[MAX_PATH] = L"";
 	if (!GetFilePath(true, szPath)) return;
 	ReportError(mainWnd, export_to_file_on_windows((uint16_t*)szPath), L"Export failed.");
+
+	if (activeTab == IDC_TAB_ACCOUNTS) InvalidateAboveToolbar();
 }
 
 void ExportEncryptedToFile()
@@ -1785,6 +1812,8 @@ void ExportEncryptedToFile()
 
 	ReportError(mainWnd, export_to_encrypted_file_on_windows((uint16_t*)szPath, passwordUtf8), L"Export failed.");
 	ZeroMemory(passwordWindowBuf, sizeof(passwordWindowBuf));
+	
+	if (activeTab == IDC_TAB_ACCOUNTS) InvalidateAboveToolbar();
 }
 
 void ExportEncryptedToClipboard()
@@ -1796,6 +1825,8 @@ void ExportEncryptedToClipboard()
 
 	ReportError(mainWnd, export_encrypted_to_clipboard(passwordUtf8), L"Export failed.");
 	ZeroMemory(passwordWindowBuf, sizeof(passwordWindowBuf));
+
+	if (activeTab == IDC_TAB_ACCOUNTS) InvalidateAboveToolbar();
 }
 
 void ImportFromClipboard()
@@ -2062,6 +2093,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDM_EXPORT_UNENCRYPTED_TO_CLIPBOARD:
 			export_to_clipboard();
+			if (activeTab == IDC_TAB_ACCOUNTS) InvalidateAboveToolbar();
 			break;
 		case IDM_EXPORT_ENCRYPTED_TO_CLIPBOARD:
 			ExportEncryptedToClipboard();
