@@ -51,6 +51,7 @@ extern "C" {
 	uint32_t unfiltered_accounts_len();
 	uint32_t get_backup_needed();
 	uint32_t dismiss_backup_reminder();
+	uint32_t describe_error(uint32_t code, uint8_t* dest, uint32_t dest_len);
 
 	uint32_t get_code(uint32_t index, uint8_t *dest, uint32_t dest_len, uint32_t *millis_per_code, uint32_t *millis_into_code);
 	uint32_t add_account(uint8_t *name, uint8_t *code, uint32_t algorithm, uint32_t digits, uint32_t period);
@@ -708,7 +709,12 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 void ReportError(HWND parent, uint32_t err, WCHAR* message)
 {
 	if (err) {
-		MessageBoxW(parent, message, L"Error", MB_ICONERROR);
+		WCHAR errorBuf[256] = L"";
+		uint8_t errorUtf8[512];
+		if (0 == describe_error(err, errorUtf8, sizeof(errorUtf8))) {
+			MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS | MB_USEGLYPHCHARS, (char*)errorUtf8, sizeof(errorUtf8), errorBuf, sizeof(errorBuf) / sizeof(*errorBuf));
+		}
+		MessageBoxW(parent, errorBuf, message, MB_ICONERROR);
 	}
 }
 
@@ -1084,7 +1090,7 @@ void SaveAccount()
 		? add_account(nameUtf8, codeUtf8, algorithm, tokenLength, period)
 		: edit_account(editingAccountIndex, nameUtf8, codeUtf8, algorithm, tokenLength, period);
 	if (err) {
-		MessageBox(mainWnd, L"The edit operation failed", L"Error", MB_ICONERROR|MB_OK);
+		ReportError(mainWnd, err, activeTab == IDC_TAB_ADD ? L"Add failed" : L"Edit failed");
 		return;
 	}
 

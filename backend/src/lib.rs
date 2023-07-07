@@ -418,6 +418,46 @@ fn get_account_qr_code_inner(index: u32, dest: *mut u8, dest_len: u32, side_len_
 }
 
 #[no_mangle]
+pub extern "C" fn describe_error(code: u32, dest: *mut u8, dest_len: u32) -> u32 {
+    result_to_error_code(describe_error_inner(code, dest, dest_len))
+}
+fn describe_error_inner(code: u32, dest: *mut u8, dest_len: u32) -> Result<(), TotpError> {
+    let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
+    let description = match code {
+        1 /* TotpError::MalformedUrl */ => "Expected a otpauth:// URL, but found something else.",
+        2 /* UnsupportedCodeType */ => "Unsupported authentication code type. Only TOTP is supported.",
+        3 /* DuplicateQueryParameters */ => "Duplicate query parameters exist in a TOTP URL.",
+        4 /* MalformedSecret */ => "The secret is not in the expected format.",
+        5 /* UnsupportedDigitCount */ => "Toptyp does not support this number of digits in a code. Toptyp supports code lengths of 6, 8 and 10.",
+        6 /* UnsupportedPeriod */ => "Toptyp does not support this interval between codes. Toptyp supports intervals of 15 seconds, 30 seconds, and 60 seconds.",
+        7 /* UnsupportedAlgorithm */ => "Toptyp does not support the specified algorithm. Toptyp supports SHA-1, SHA-256, and SHA-512.",
+        8 /* MissingSecret */ => "The secret is missing from a URL.",
+        9 /* MalformedDigits */ => "The number of digits is missing from a URL.",
+        10 /* MalformedPeriod */ => "The interval between codes is missing from a URL.",
+        11 /* MalformedName */ => "The given name is not supported. It may contain invalid letters.",
+        12 /* FileWriteError */ => "Toptyp was unable to write to a file.",
+        13 /* AccountNotFound */ => "Account not found.",
+        14 /* ImageTooLarge */ => "The image is too large.",
+        15 /* IndexOutOfRange */ => "Toptyp has encountered an internal error. It was confused about how many accounts exist.",
+        16 /* FileReadError */ => "Toptyp was unable to read from a file.",
+        17 /* UnsupportedPassword */ => "This password is not supported. It may contain invalid letters.",
+        18 /* InternalError */ => "Toptyp has encountered an internal error.",
+        19 /* PasswordNeededForImport */ => "A password is needed to decrypt this data for import.",
+        20 /* EditInProgress */ => "Another edit operation is in progress.",
+        21 /* MalformedFileText */ => "A file could not be interpreted as text.",
+        22 /* DecryptFailed */ => "Decryption failed, possibly due to an invalid password.",
+        23 /* UndersizedBuffer */ => "Data was too long to fit in the provided memory.",
+        24 /* UnsupportedBufferSize */ => "A given memory buffer size was invalid.",
+        25 /* MalformedSearchQuery */ => "The search text is not supported. In may contain invalid letters.",
+        26 /* TooLargeForQrCode */ => "The account was too long to be encoded in a QR code.",
+        _ => "An unknown error occurred."
+    };
+    
+    write_to_buffer(dest, description)?;
+    Ok( () )
+}
+
+#[no_mangle]
 pub extern "C" fn get_code(index: u32, dest: *mut u8, dest_len: u32, millis_per_code: *mut u32, millis_into_code: *mut u32) -> u32 {
     result_to_error_code(get_code_inner(index, dest, dest_len, millis_per_code, millis_into_code))
 }
