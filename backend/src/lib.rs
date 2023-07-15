@@ -103,6 +103,7 @@ enum TotpError {
     UnsupportedBufferSize = 24,
     MalformedSearchQuery = 25,
     TooLargeForQrCode = 26,
+    FileNotFound = 27,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -299,8 +300,21 @@ fn text_to_accounts(text: &str) -> Result<Vec<Account>, TotpError> {
 }
 
 fn load_accounts_inner() -> Result<(), TotpError> {
-    // TODO: Also try temp path
-    let data = file_to_string(&get_save_file())?;
+    let path = get_save_file();
+    let data = match file_to_string(&path)? {
+        Some(data) => data,
+        None => {
+            // Attempt a recovery from a temp file.
+            let temp_path = get_save_temp_file();
+            if !temp_path.exists() || rename(&temp_path, &path).is_err() {
+                String::new()
+            } else if let Ok(Some(data)) = file_to_string(&path) {
+                data
+            } else {
+                String::new()
+            }
+        }
+    };
     let backup_needed = get_backup_needed_file().exists();
     
     {
@@ -450,6 +464,7 @@ fn describe_error_inner(code: u32, dest: *mut u8, dest_len: u32) -> Result<(), T
         24 /* UnsupportedBufferSize */ => "A given memory buffer size was invalid.",
         25 /* MalformedSearchQuery */ => "The search text is not supported. In may contain invalid letters.",
         26 /* TooLargeForQrCode */ => "The account was too long to be encoded in a QR code.",
+        27 /* FileNotFound */ => "File not found.",
         _ => "An unknown error occurred."
     };
     
@@ -586,13 +601,16 @@ fn set_search_query_inner(query: *const u8) -> Result<(), TotpError> {
     update_search_results()
 }
 
-fn file_to_string(path: &Path) -> Result<String, TotpError> {
+fn file_to_string(path: &Path) -> Result<Option<String>, TotpError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    
     // TODO: Enforce a reasonable size limit, so we don't hang in the case of a many-GB file
     let mut data_bytes = Vec::new();
-    if path.exists() {
-        File::open(&path).and_then(|mut f| f.read_to_end(&mut data_bytes)).map_err(|_| TotpError::FileReadError)?;
-    }
-    String::from_utf8(data_bytes).map_err(|_| TotpError::MalformedFileText)
+    File::open(&path).and_then(|mut f| f.read_to_end(&mut data_bytes)).map_err(|_| TotpError::FileReadError)?;
+    let contents = String::from_utf8(data_bytes).map_err(|_| TotpError::MalformedFileText)?;
+    Ok(Some(contents))
 }
 
 fn ensure_directory_exists() -> Result<(), TotpError> {
@@ -610,19 +628,27 @@ fn atomic_file_modification(cause_for_backup: bool, modify_data: &dyn Fn(Vec<Str
     
     if temp_file_path.exists() {
         if data_file_path.exists() {
-            // A previous atomic file modification must have be interrupted.
-            rename(&data_file_path, &temp_file_path).map_err(|_| TotpError::EditInProgress)?;
-        } else {
             remove_file(&temp_file_path).map_err(|_| TotpError::EditInProgress)?; // If this doesn't get removed, we have another instance actively working on the file. That is very strange, so report the errot to user.
+        } else {
+            // A previous atomic file modification must have be interrupted.
+            rename(&temp_file_path, &data_file_path).map_err(|_| TotpError::EditInProgress)?;
         }
     }
     
     ensure_directory_exists()?;
     
     let mut temp_file = OpenOptions::new().write(true).create_new(true).open(&temp_file_path).map_err(|_| TotpError::FileWriteError)?;
-    let old_data = file_to_string(&data_file_path)?;
+    
+    let old_data = file_to_string(&data_file_path)?.unwrap_or(String::new());
     let old_data_lines: Vec<String> = old_data.lines().map(|line| line.trim()).filter(|line| line.len()>0).map(|s| s.to_string()).collect();
-    let new_data_lines = modify_data(old_data_lines)?;
+    let new_data_lines = match modify_data(old_data_lines) {
+        Ok(new_data_lines) => new_data_lines,
+        Err(e) => {
+            drop(temp_file);
+            let _ = remove_file(&temp_file_path);
+            return Err(e);
+        }
+    };
     let new_data = new_data_lines.join("\r\n");
     temp_file.write_all(new_data.as_bytes()).map_err(|_| TotpError::FileWriteError)?;
     drop(temp_file);
@@ -811,7 +837,7 @@ pub extern "C" fn export_to_encrypted_file_on_windows(path: *const u16, password
 }
 
 fn export_to_file(path: OsString) -> Result<(), TotpError> {
-    let data = file_to_string(&get_save_file())?;
+    let data = file_to_string(&get_save_file())?.unwrap_or(String::new());
     File::create(path).and_then(|mut f| f.write_all(data.as_bytes())).map_err(|_| TotpError::FileWriteError)?;
     record_backup_made()?;
     Ok( () )
@@ -860,7 +886,7 @@ fn string_encrypt(plaintext: &str, password: &str) -> Result<String, TotpError> 
 
 fn encrypt_with_password(password: *const u8) -> Result<String, TotpError> {
     let password = unsafe { CStr::from_ptr(password as *const i8) };
-    let plaintext = file_to_string(&get_save_file())?;
+    let plaintext = file_to_string(&get_save_file())?.unwrap_or(String::new());
     let password = password.to_str().map_err(|_| TotpError::UnsupportedPassword)?;
     string_encrypt(&plaintext, password)
 }
@@ -879,7 +905,7 @@ pub extern "C" fn export_to_clipboard() -> u32 {
 
 fn export_to_clipboard_inner() -> Result<(), TotpError> {
     let mut clipboard = Clipboard::new().map_err(|_| TotpError::InternalError)?;
-    let data = file_to_string(&get_save_file())?;
+    let data = file_to_string(&get_save_file())?.unwrap_or(String::new());
     clipboard.set_text(data).map_err(|_| TotpError::InternalError)?;
     record_backup_made()?;
     Ok( () )
@@ -1000,7 +1026,7 @@ fn decrypt(ciphertext: &[u8], password: &str) -> Result<String, TotpError> {
 
 fn import_inner(path: OsString, password: *const u8) -> Result<(), TotpError> {
     let mut contents = IMPORT_CONTENTS.lock().map_err(|_| TotpError::InternalError)?;
-    *contents = file_to_string(&PathBuf::from(path))?;
+    *contents = file_to_string(&PathBuf::from(path))?.ok_or(TotpError::FileNotFound)?;
     import_string(&contents, password)
 }
     
