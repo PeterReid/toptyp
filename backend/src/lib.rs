@@ -19,6 +19,7 @@ use std::ops::DerefMut;
 use std::collections::HashSet;
 use qrcode::QrCode;
 use qrcode::types::Color;
+use std::cmp::min;
 
 use arboard::Clipboard;
 
@@ -104,6 +105,7 @@ enum TotpError {
     MalformedSearchQuery = 25,
     TooLargeForQrCode = 26,
     FileNotFound = 27,
+    FileTooLarge = 28,
 }
 
 impl ::std::fmt::Display for TotpError {
@@ -465,6 +467,7 @@ fn describe_error_inner(code: u32, dest: *mut u8, dest_len: u32) -> Result<(), T
         25 /* MalformedSearchQuery */ => "The search text is not supported. In may contain invalid letters.",
         26 /* TooLargeForQrCode */ => "The account was too long to be encoded in a QR code.",
         27 /* FileNotFound */ => "File not found.",
+        28 /* FileTooLarge */ => "File is too large.",
         _ => "An unknown error occurred."
     };
     
@@ -601,14 +604,32 @@ fn set_search_query_inner(query: *const u8) -> Result<(), TotpError> {
     update_search_results()
 }
 
+fn read_to_end_limited(mut file: File, max_size: usize) -> Result<Vec<u8>, TotpError> {
+    let mut size = 0;
+    let chunk_size = 1024*10;
+    let mut data = vec![0u8; min(max_size+1, chunk_size)];
+    
+    loop {
+        let read_count = file.read(&mut data[size..]).map_err(|_| TotpError::FileReadError)?;
+        if read_count == 0 {
+            return Ok(data);
+        }
+        size += read_count;
+        
+        if size > max_size {
+            return Err(TotpError::FileTooLarge);
+        }
+        data.resize(size + chunk_size, 0);
+    }
+}
+
 fn file_to_string(path: &Path) -> Result<Option<String>, TotpError> {
     if !path.exists() {
         return Ok(None);
     }
     
-    // TODO: Enforce a reasonable size limit, so we don't hang in the case of a many-GB file
-    let mut data_bytes = Vec::new();
-    File::open(&path).and_then(|mut f| f.read_to_end(&mut data_bytes)).map_err(|_| TotpError::FileReadError)?;
+    let f = File::open(&path).map_err(|_| TotpError::FileReadError)?;
+    let data_bytes = read_to_end_limited(f, 1_000_000)?;
     let contents = String::from_utf8(data_bytes).map_err(|_| TotpError::MalformedFileText)?;
     Ok(Some(contents))
 }
