@@ -1628,40 +1628,6 @@ void PaintAddTab(HDC hdc)
 {
 	RECT edits[2] = { addAccountTab.nameEditArea, addAccountTab.codeEditArea };
 	PaintEdits(hdc, edits, 2);
-
-	HFONT oldFont = (HFONT)SelectObject(hdc, font);
-
-	int textHeight = GetTextHeight(hdc);
-	
-	RECT clientRect;
-	GetClientRect(mainWnd, &clientRect);
-
-	SetTextColor(hdc, RGB(240,30,30));
-
-	int labelAboveField = sizeBasis;
-
-	int componentTop = clientRect.top + sizeBasis;
-	int componentBottom = clientRect.bottom - bottomButtonHeight - sizeBasis - sizeBasis*3;
-
-	RECT labelRect;
-	labelRect.left = addAccountTab.nameEditArea.left + sizeBasis/3;
-	labelRect.right = addAccountTab.nameEditArea.right;
-
-	WCHAR *labels[] = {
-		L"Account Name",
-		L"Secret Code",
-		L"Token Length",
-		L"Algorithm",
-		L"Token Rotates Every..."
-	};
-	for (int i=0; i<5; i++) {
-		labelRect.top = componentTop + (componentBottom - componentTop) * i / 5;
-		labelRect.bottom = labelRect.top + textHeight;
-		//DrawText(hdc, labels[i], -1, &labelRect, DT_SINGLELINE);
-	}
-
-	SelectObject(hdc, oldFont);
-
 }
 
 void CopyAsciiToClipboard(const char *ascii)
