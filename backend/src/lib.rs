@@ -440,7 +440,7 @@ pub extern "C" fn describe_error(code: u32, dest: *mut u8, dest_len: u32) -> u32
 fn describe_error_inner(code: u32, dest: *mut u8, dest_len: u32) -> Result<(), TotpError> {
     let dest = unsafe { ::std::slice::from_raw_parts_mut(dest, dest_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
     let description = match code {
-        1 /* TotpError::MalformedUrl */ => "Expected a otpauth:// URL, but found something else.",
+        1 /* TotpError::MalformedUrl */ => "Expected an otpauth:// URL, but found something else.",
         2 /* UnsupportedCodeType */ => "Unsupported authentication code type. Only TOTP is supported.",
         3 /* DuplicateQueryParameters */ => "Duplicate query parameters exist in a TOTP URL.",
         4 /* MalformedSecret */ => "The secret is not in the expected format.",
@@ -634,6 +634,12 @@ fn file_to_string(path: &Path) -> Result<Option<String>, TotpError> {
     Ok(Some(contents))
 }
 
+fn sort_accounts(urls: &mut [String]) {
+    urls.sort_by_cached_key(|url| {
+        Account::from_url(url).map(|account| account.name).unwrap_or(String::new())
+    });
+}
+
 fn ensure_directory_exists() -> Result<(), TotpError> {
     let mut dir = dirs::config_dir().unwrap_or(PathBuf::from("."));
     dir.push("toptyp");
@@ -662,7 +668,7 @@ fn atomic_file_modification(cause_for_backup: bool, modify_data: &dyn Fn(Vec<Str
     
     let old_data = file_to_string(&data_file_path)?.unwrap_or(String::new());
     let old_data_lines: Vec<String> = old_data.lines().map(|line| line.trim()).filter(|line| line.len()>0).map(|s| s.to_string()).collect();
-    let new_data_lines = match modify_data(old_data_lines) {
+    let mut new_data_lines = match modify_data(old_data_lines) {
         Ok(new_data_lines) => new_data_lines,
         Err(e) => {
             drop(temp_file);
@@ -670,6 +676,7 @@ fn atomic_file_modification(cause_for_backup: bool, modify_data: &dyn Fn(Vec<Str
             return Err(e);
         }
     };
+    sort_accounts(&mut new_data_lines[..]);
     let new_data = new_data_lines.join("\r\n");
     temp_file.write_all(new_data.as_bytes()).map_err(|_| TotpError::FileWriteError)?;
     drop(temp_file);
