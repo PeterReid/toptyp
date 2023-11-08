@@ -350,7 +350,12 @@ fn record_backup_needed() -> Result<(), TotpError> {
 fn record_backup_made() -> Result<(), TotpError> {
     let mut backup_needed = BACKUP_NEEDED.lock().map_err(|_| TotpError::InternalError)?;
     *backup_needed.deref_mut() = false;
-    remove_file(&get_backup_needed_file()).map_err(|_| TotpError::FileWriteError)
+    let backup_path = get_backup_needed_file();
+    if backup_path.exists() {
+        remove_file(&backup_path).map_err(|_| TotpError::FileWriteError)
+    } else {
+        Ok( () )
+    }
 }
 
 #[no_mangle]
