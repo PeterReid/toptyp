@@ -905,8 +905,7 @@ void InitAddTab()
 	advancedButtonRect.top = componentTop + (componentBottom - componentTop) * 2 / 5 + componentPlacementFromTop;
 	advancedButtonRect.bottom = advancedButtonRect.top + sizeBasis * 5 / 2;
 
-	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), NULL, WS_CHILD | ES_AUTOHSCROLL | WS_TABSTOP | WS_GROUP, advancedButtonRect.left, advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left, advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
-	SetWindowText(addAccountTab.advancedButton, L"Show Advanced Options");
+	addAccountTab.advancedButton = CreateWindow(_T("BUTTON"), L"Show Advanced Options", WS_CHILD | ES_AUTOHSCROLL | WS_TABSTOP | WS_GROUP, advancedButtonRect.left, advancedButtonRect.top, advancedButtonRect.right - advancedButtonRect.left, advancedButtonRect.bottom - advancedButtonRect.top, mainWnd, (HMENU)IDC_ADVANCED, NULL, NULL);
 	SetWindowSubclass(addAccountTab.advancedButton, SaveButtonProc, 0, 0);
 
 	
@@ -916,8 +915,7 @@ void InitAddTab()
 	saveButtonRect.right = saveButtonRect.left + saveButtonWidth;
 	saveButtonRect.top = mainRect.bottom - bottomButtonHeight - sizeBasis*4;
 	saveButtonRect.bottom = saveButtonRect.top + sizeBasis*5/2;
-	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), NULL, WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP|WS_GROUP, saveButtonRect.left,saveButtonRect.top, saveButtonRect.right - saveButtonRect.left,saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
-	SetWindowText(addAccountTab.saveButton, L"Save");
+	addAccountTab.saveButton = CreateWindow(_T("BUTTON"), L"Save", WS_CHILD | ES_AUTOHSCROLL | WS_TABSTOP | WS_GROUP, saveButtonRect.left, saveButtonRect.top, saveButtonRect.right - saveButtonRect.left, saveButtonRect.bottom - saveButtonRect.top, mainWnd, (HMENU)IDC_SAVE, NULL, NULL);
 	SetWindowSubclass(addAccountTab.saveButton, SaveButtonProc, 0, 0);
 
 	WCHAR *labels[] = {
