@@ -2335,6 +2335,18 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 	return (INT_PTR)FALSE;
 }
 
+// Shrink so that the rounded border will occupy the original space of this edit
+void ShrinkEditHorizontally(HWND ctrl) {
+	int radius = sizeBasis / 3;
+	int margin = 2 * radius;
+
+	WINDOWPLACEMENT wndpl = { 0 };
+	GetWindowPlacement(ctrl, &wndpl);
+	wndpl.rcNormalPosition.left += margin;
+	wndpl.rcNormalPosition.right -= margin;
+	SetWindowPlacement(ctrl, &wndpl);
+}
+
 // Message handler for about box.
 INT_PTR CALLBACK SetPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -2346,6 +2358,8 @@ INT_PTR CALLBACK SetPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 		EnableWindow(GetDlgItem(hDlg, IDOK), FALSE);
 		SetWindowSubclass(GetDlgItem(hDlg, IDOK), SaveButtonProc, 0, 0);
 		SetWindowSubclass(GetDlgItem(hDlg, IDCANCEL), SaveButtonProc, 0, 0);
+		ShrinkEditHorizontally(GetDlgItem(hDlg, IDC_PASSWORD_1));
+		ShrinkEditHorizontally(GetDlgItem(hDlg, IDC_PASSWORD_2));
 		}
 		return (INT_PTR)TRUE;
 	case WM_CTLCOLORDLG:
@@ -2408,6 +2422,7 @@ INT_PTR CALLBACK EnterPasswordDlg(HWND hDlg, UINT message, WPARAM wParam, LPARAM
 	{
 		SetWindowSubclass(GetDlgItem(hDlg, IDOK), SaveButtonProc, 0, 0);
 		SetWindowSubclass(GetDlgItem(hDlg, IDCANCEL), SaveButtonProc, 0, 0);
+		ShrinkEditHorizontally(GetDlgItem(hDlg, IDC_PASSWORD_1));
 	}
 	return (INT_PTR)TRUE;
 	case WM_CTLCOLORDLG:
