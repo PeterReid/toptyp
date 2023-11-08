@@ -114,8 +114,8 @@ int APIENTRY _tWinMain(HINSTANCE hInstance,
 	}
 
 	hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_TOTP));
-	handCursor = LoadCursor(NULL, MAKEINTRESOURCE(IDC_HAND));
-	arrowCursor = LoadCursor(NULL, MAKEINTRESOURCE(IDC_ARROW));
+	handCursor = LoadCursor(NULL, IDC_HAND);
+	arrowCursor = LoadCursor(NULL, IDC_ARROW);
 
 	// Main message loop:
 	while (GetMessage(&msg, NULL, 0, 0))
