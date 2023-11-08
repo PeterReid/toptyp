@@ -612,6 +612,7 @@ fn read_to_end_limited(mut file: File, max_size: usize) -> Result<Vec<u8>, TotpE
     loop {
         let read_count = file.read(&mut data[size..]).map_err(|_| TotpError::FileReadError)?;
         if read_count == 0 {
+            data.truncate(size);
             return Ok(data);
         }
         size += read_count;
