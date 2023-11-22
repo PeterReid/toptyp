@@ -1439,7 +1439,7 @@ void PaintAccounts(HDC hdc)
 	SelectClipRgn (hdc, listRegion);
 
 	HBRUSH dividerBrush = CreateSolidBrush(RGB(230,230,230));
-	HBRUSH backgroundBrush = CreateSolidBrush(RGB(255,255,255));
+	HBRUSH backgroundBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
 			
 	HBITMAP itemBmp = CreateCompatibleBitmap(hdc, scrollRect.left, listItemHeight);
 	HDC itemDC = CreateCompatibleDC(hdc);
@@ -1620,7 +1620,6 @@ void PaintAccounts(HDC hdc)
 	DeleteObject(itemBmp);
 
 	DeleteObject(dividerBrush);
-	DeleteObject(backgroundBrush);
 	DeleteObject(listRegion);
 }
 
