@@ -706,7 +706,15 @@ fn get_account_inner(index: u32, from_scan_results: u32, name: *mut u8, name_len
     let code = unsafe { ::std::slice::from_raw_parts_mut(code, code_len.try_into().map_err(|_| TotpError::UnsupportedBufferSize)?) };
     
     let mut accounts = (if from_scan_results==0 { ACCOUNTS.lock() } else { SCAN_RESULTS.lock() }).map_err(|_| TotpError::InternalError)?;
-    let account = get_account_by_index(&mut accounts, index)?;
+    let account = if from_scan_results == 0 {
+        get_account_by_index(&mut accounts, index)?
+    } else {
+        let index: usize = index.try_into().map_err(|_| TotpError::IndexOutOfRange)?;
+        if index >= accounts.len() {
+            return Err(TotpError::IndexOutOfRange)?;
+        }
+        &accounts[index]
+    };
     
     write_to_buffer(name, account.name.as_str())?;
     write_to_buffer(code, &base32::encode(base32::Alphabet::RFC4648{padding: false}, &account.secret))?;
