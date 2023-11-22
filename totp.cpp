@@ -780,6 +780,8 @@ HWND CreateHintingEdit(RECT r, int idc, WCHAR *hintText)
 
 void InitAccountsTab()
 {
+	set_search_query((uint8_t *)"");
+
 	RECT clientRect;
 	GetClientRect(mainWnd, &clientRect);
 
