@@ -1654,8 +1654,9 @@ void EditAccount(int idx, bool fromScanResults)
 	WCHAR codeBuf[256];
 
 	uint32_t algorithm, digits, period;
-	if (get_account(idx, (uint32_t)fromScanResults, nameUtf8, sizeof(nameUtf8), codeUtf8, sizeof(codeUtf8), &algorithm, &digits, &period)) {
-		MessageBox(mainWnd, L"Failed to load account details", L"Error", MB_ICONERROR);
+	uint32_t err = get_account(idx, (uint32_t)fromScanResults, nameUtf8, sizeof(nameUtf8), codeUtf8, sizeof(codeUtf8), &algorithm, &digits, &period);
+	if (err) {
+		ReportError(mainWnd, err, L"Failed to load account details");
 		return;
 	}
 
