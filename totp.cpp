@@ -2107,6 +2107,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			break;
 		case IDC_SCAN:
 			RunScan();
+			break;
 		case IDOK:
 			if (activeTab == IDC_TAB_ACCOUNTS && GetFocus() == accountSearchEdit) {
 				char codeUtf8[50] = { 0 };
