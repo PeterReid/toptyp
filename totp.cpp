@@ -1401,8 +1401,6 @@ void PaintAccounts(HDC hdc)
 	if (showBackupReminder) {
 		listBottom -= sizeBasis * 2;
 	}
-
-
 	
 	int account_count = accounts_len();
 
@@ -2187,7 +2185,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 			InvalidateAccountList();
 
-			// This was intended as aa one-shot timer. Kill it, or else it will repeat.
+			// This was intended as a one-shot timer. Kill it, or else it will repeat.
 			KillTimer(mainWnd, codeDrawingProgressTimer);
 			codeDrawingProgressTimer = 0;
 		}
