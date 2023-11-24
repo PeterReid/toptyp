@@ -198,7 +198,7 @@
     <ClCompile Include="totp.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="totp.rc" />
+    <ResourceCompile Include="toptyp.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
