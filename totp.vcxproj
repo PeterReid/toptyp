@@ -180,7 +180,7 @@
   <ItemGroup>
     <None Include="ReadMe.txt" />
     <None Include="small.ico" />
-    <None Include="totp.ico" />
+    <None Include="toptyp.ico" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Resource.h" />
