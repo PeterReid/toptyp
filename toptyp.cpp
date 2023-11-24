@@ -2,7 +2,7 @@
 //
 
 #include "stdafx.h"
-#include "totp.h"
+#include "toptyp.h"
 #include <commctrl.h>
 #include <stdint.h>
 #define MAX_LOADSTRING 100
