@@ -645,10 +645,9 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			HDC cornersDC = CreateCompatibleDC(hdc);
 			SelectObject(cornersDC, corners);
-			HBRUSH b = CreateSolidBrush(RGB(255,255,255));
 			HBRUSH selectedBrush = CreateSolidBrush(RGB(240,30,30));
 			
-			FillRect(hdc, &r, b);
+			FillRect(hdc, &r, (HBRUSH)GetStockObject(WHITE_BRUSH));
 
 			HBRUSH foregroundBrush = CreateSolidBrush(foreground);
 			RECT lineRect;
@@ -690,7 +689,6 @@ LRESULT CALLBACK RadioButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
 			DeleteDC(cornersDC);
 			DeleteObject(corners);
-			DeleteObject(b);
 			DeleteObject(foregroundBrush);
 			DeleteObject(selectedBrush);
 
