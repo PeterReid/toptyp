@@ -21,7 +21,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{C28E0B58-D312-4D2B-89A1-31D052F4B2F8}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>totp</RootNamespace>
+    <RootNamespace>toptyp</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
     <ProjectName>Toptyp</ProjectName>
   </PropertyGroup>
@@ -98,7 +98,7 @@
       <AdditionalLibraryDirectories>backend\target\release\</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
-      <AdditionalManifestFiles>totp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+      <AdditionalManifestFiles>toptyp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
@@ -120,7 +120,7 @@
       <AdditionalLibraryDirectories>backend\target\debug\</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
-      <AdditionalManifestFiles>totp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+      <AdditionalManifestFiles>toptyp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
@@ -146,7 +146,7 @@
       <AdditionalLibraryDirectories>backend\target\release\</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
-      <AdditionalManifestFiles>totp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+      <AdditionalManifestFiles>toptyp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>
@@ -172,7 +172,7 @@
       <AdditionalLibraryDirectories>backend\target\release\</AdditionalLibraryDirectories>
     </Link>
     <Manifest>
-      <AdditionalManifestFiles>totp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+      <AdditionalManifestFiles>toptyp.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
     <Manifest>
       <EnableDPIAwareness>true</EnableDPIAwareness>

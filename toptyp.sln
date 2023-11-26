@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 11.00
 # Visual Studio 2010
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "totp", "totp.vcxproj", "{C28E0B58-D312-4D2B-89A1-31D052F4B2F8}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "toptyp", "toptyp.vcxproj", "{C28E0B58-D312-4D2B-89A1-31D052F4B2F8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
