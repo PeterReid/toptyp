@@ -99,7 +99,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <None Include="ReadMe.txt" />
-    <None Include="small.ico" />
     <None Include="toptyp.ico" />
   </ItemGroup>
   <ItemGroup>
