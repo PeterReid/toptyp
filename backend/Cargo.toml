@@ -1,10 +1,10 @@
 [package]
-name = "backend"
+name = "toptyp_backend"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "totp_backend"
+name = "toptyp_backend"
 crate-type = ["staticlib"]
 
 [dependencies]
