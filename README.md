@@ -13,3 +13,9 @@ Toptyp is lightweight, starting nearly instantly and using less than 2MB of memo
 
 
 <img src="https://raw.githubusercontent.com/PeterReid/toptyp/master/usage.png"/>
+
+### Building
+Rust and Visual Studio 2022 are required to build this. After cloning the repository, navigate to `backend` and run `cargo build --release`. Then open toptyp.sln with Visual Studio and choose Build Solution.
+
+### Why Toptyp
+Toptyp was written to help prevent smartphones from being mandatory.
